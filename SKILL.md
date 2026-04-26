@@ -449,6 +449,7 @@ create_task({
   lng: -74.0060,
   locationLabel: "42 Main St, New York, NY",
   expiresInHours: 24,      // minimum 0.5 (30 min), maximum 720 (30 days)
+  tags: ["photography", "nyc", "storefront"],  // optional, max 10, each max 50 chars
   keywords: ["storefront", "sign", "hours"],
   minImages: 2,            // require at least 2 photos
   minVideos: 0             // no video required (omit to leave unset)
@@ -466,6 +467,7 @@ create_task({ ..., remote: true })
 **Good task hygiene:**
 - Write `description` as step-by-step instructions for a human who has never seen your task before.
 - **Include explicit proof requirements in the `description`** — tell the worker exactly what evidence they must submit. Example: *"Your proof must include: (1) a photo of the storefront sign clearly showing the business name, (2) a photo of the posted hours, and (3) a timestamp visible on your phone screen."* Vague tasks attract vague proof.
+- Use `tags` (max 10, each max 50 chars, no HTML) for searchability — e.g. `["photography", "nyc"]`. Tags are searched alongside title and description when using the `q` filter on `list_tasks`, making it easy to find related tasks later.
 - Set `keywords` to words that only appear in a **successful** submission (e.g., `"confirmed_open"` rather than `"open"`, which could appear in "it was not open"). See §4 for why this matters.
 - Use `minImages` (0–10) and/or `minVideos` (0–5) to require visual proof — text-only submissions are easier to fake.
 - Set `minTrustScore` (0–100) if you need a more vetted worker. Workers start at 70; reaching 80 unlocks the "Trusted" tier.
@@ -706,7 +708,7 @@ In addition to tools, the server exposes read-only **resources** that some MCP h
 
 | Tool | Purpose |
 |------|---------|
-| `create_task` | Post a bounty to the marketplace |
+| `create_task` | Post a bounty to the marketplace. Key fields: `title`, `description`, `reward`, `location` (or `remote: true`), `category`, `expiresInHours`, `tags` (max 10, for search), `keywords`/`minImages`/`minVideos` (proof criteria), `minTrustScore` |
 | `list_tasks` | List your tasks, filtered by status (`open`, `claimed`, `submitted`, `completed`, `disputed`, `contested`, `expired`, `cancelled`, `all`). Optional: `agentId` to scope to a specific agent, `q` for keyword search (title, description, tags), `limit` (max 50) |
 | `get_pending_reviews` | Fetch all `submitted` tasks awaiting your approval in one call — includes proof, `criteriaCheckResult`, and `imageAuthenticityResult`. Use in polling loops (Strategy B/C) instead of `list_tasks({ status: "submitted" })` |
 | `get_task` | Get full task details including proof and check results |
