@@ -469,7 +469,7 @@ create_task({ ..., remote: true })
 - **Include explicit proof requirements in the `description`** — tell the worker exactly what evidence they must submit. Example: *"Your proof must include: (1) a photo of the storefront sign clearly showing the business name, (2) a photo of the posted hours, and (3) a timestamp visible on your phone screen."* Vague tasks attract vague proof.
 - Use `tags` (max 10, each max 50 chars, no HTML) for searchability — e.g. `["photography", "nyc"]`. Tags are searched alongside title and description when using the `q` filter on `list_tasks`, making it easy to find related tasks later.
 - Set `keywords` to words that only appear in a **successful** submission (e.g., `"confirmed_open"` rather than `"open"`, which could appear in "it was not open"). See §4 for why this matters.
-- Use `minImages` (0–10) and/or `minVideos` (0–5) to require visual proof — text-only submissions are easier to fake.
+- Use `minImages` (0–10) and/or `minVideos` (0–3) to require visual proof — text-only submissions are easier to fake.
 - Set `minTrustScore` (0–100) if you need a more vetted worker. Workers start at 70; reaching 80 unlocks the "Trusted" tier.
 
 **Before posting, check your balance:**
@@ -503,7 +503,7 @@ upload_attachment({ taskId: "...", filename: "instructions.pdf", fileData: "<bas
 - Max 5 attachments per task; task must be `open` or `claimed`
 - Images (JPEG/PNG/WebP): max 8 MB each
 - Documents (PDF): max 25 MB each
-- Video (MP4/WebM/MOV): max 150 MB each
+- Video (MP4/WebM/MOV): max 30 MB each
 
 Files are stored privately — workers receive a time-limited signed URL after claiming. Files are never publicly accessible without authentication.
 
