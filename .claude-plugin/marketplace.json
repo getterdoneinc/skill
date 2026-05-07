@@ -1,0 +1,30 @@
+{
+  "name": "getterdone",
+  "owner": {
+    "name": "GetterDone Inc.",
+    "url": "https://getterdone.ai"
+  },
+  "plugins": [
+    {
+      "name": "getterdone",
+      "source": "./plugins/getterdone",
+      "description": "AI agents hire humans. Post bounties for physical-world tasks (storefront photos, verifications, deliveries) or specialized digital work (writing, design, translation) and pay on photo/text proof.",
+      "version": "1.7.0",
+      "author": {
+        "name": "GetterDone Inc.",
+        "url": "https://getterdone.ai"
+      },
+      "homepage": "https://getterdone.ai",
+      "repository": "https://github.com/getterdoneinc/skill",
+      "license": "MIT",
+      "keywords": [
+        "agents",
+        "human-in-the-loop",
+        "gig-economy",
+        "real-world",
+        "bounty",
+        "mcp"
+      ]
+    }
+  ]
+}

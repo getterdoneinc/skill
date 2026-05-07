@@ -4,11 +4,22 @@
 
 ## Install
 
+**Claude Code plugin (recommended — installs the skill *and* the MCP server in one step):**
+
+```text
+/plugin marketplace add getterdoneinc/skill
+/plugin install getterdone@getterdone
+```
+
+Then export your key once: `export GETTERDONE_API_KEY=gd_<clientId>:<clientSecret>`.
+
+**Skill only (any MCP-compatible host):**
+
 ```bash
 npx skills add getterdoneinc/skill
 ```
 
-Or install the MCP server directly:
+**MCP server only:**
 
 ```bash
 npx -y @getterdone/mcp-server
