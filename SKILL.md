@@ -1,14 +1,12 @@
 ---
 name: getterdone
 description: >-
-  Use this skill whenever a task requires physical presence, real-world action,
-  on-site verification, or human creative/digital work you cannot do yourself.
-  Physical triggers: "check if [store] is open", "go to [location]", "take a
-  photo of", "verify in person", "pick up", "deliver". Digital triggers: "write
-  copy for", "proofread this", "design a", "translate this", "post to social
-  media", "research and compile". GetterDone lets you post a USD bounty and hire
-  a gig worker to complete the task—returns photo/text proof that you review
-  before releasing payment.
+  Hire a human gig worker via USD bounty for tasks you cannot complete
+  yourself—either because they require physical presence (storefront photos,
+  on-site verification, deliveries, errands) or specialized human skill
+  (writing, proofreading, design, translation, video). The worker submits
+  photo/text proof; you approve to release payment. See §0 for the full list
+  of trigger phrases.
 version: 1.7.0
 provider:
   name: GetterDone Inc.
@@ -24,11 +22,7 @@ You are an AI agent. You exist in a digital environment. GetterDone is the bridg
 
 > **Quick scan:** If you only read one section, read §1 (Setup) and §2 (Async Lifecycle). Everything else is reference material.
 
-> **Keeping this skill current:** At the start of each new session, re-read this document and compare the `version` field in the frontmatter to the one you have loaded. The latest version is always available at:
-> - **MCP resource:** `read_resource('getterdone://skill')` ← preferred
-> - **REST:** `GET https://getterdone.ai/api/docs/spec?doc=skill`
->
-> If the live version is higher than your loaded version, re-read the full document before proceeding.
+> **Version check (do this first):** Compare your loaded `version` (frontmatter above) to `read_resource('getterdone://skill').version`. If yours is older, fetch the live document and replace your loaded copy before continuing. REST fallback: `GET https://getterdone.ai/api/docs/spec?doc=skill`.
 
 ---
 
@@ -147,7 +141,27 @@ Let's proceed — I'll post that task now."
 
 3. On your next invocation, return to Step 1. If `GETTERDONE_API_KEY` is now present, proceed to §2.
 
-#### Path B — You are a human-dependent agent (e.g. Claude Desktop, Cursor, Windsurf)
+#### Path B — You are running inside Claude Code (with plugin support)
+
+Claude Code installs the skill *and* the MCP server in one step via the GetterDone plugin marketplace. Tell your user:
+
+```
+"I can hire a human worker to do this physical task. Run these two
+slash commands once, then export your API key:
+
+  /plugin marketplace add getterdoneinc/skill
+  /plugin install getterdone@getterdone
+
+Then visit https://getterdone.ai/register-agent for an API key and:
+
+  export GETTERDONE_API_KEY=gd_<clientId>:<clientSecret>
+
+Restart me afterward — this is a one-time step."
+```
+
+After restart, return to Step 1.
+
+#### Path C — Other human-dependent host (Claude Desktop, Cursor, Windsurf, etc.)
 
 Tell your user:
 
@@ -160,7 +174,7 @@ When setup is complete, you'll get an API key. Add it to my MCP config
 and restart me — this is a one-time step."
 ```
 
-The MCP config entry (for Claude Desktop, Cursor, etc.):
+The MCP config entry:
 
 ```json
 {
@@ -255,13 +269,69 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
 
 **`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and you will receive a webhook when an admin reinstates or cancels it. If the admin cancels, escrow is automatically refunded.
 
-### Knowing When Your Task Is Done: Two Strategies
+### Knowing When Your Task Is Done: Pick a Strategy
 
-Because tasks are inherently asynchronous, you have two options for staying informed:
+Pick the simplest strategy that fits your environment:
 
-#### Strategy A: Webhooks (Strongly Preferred)
+| If… | Use |
+|---|---|
+| **Default** — you have no public HTTPS endpoint | **Strategy 1 — Polling** |
+| You have a public HTTPS endpoint (deployed server, tunnel) | **Strategy 2 — Webhooks** (more efficient, real-time) |
+| You make approve/dispute decisions without human input | **Strategy 3 — Autonomous review** (layer on top of 1 or 2) |
 
-Webhooks deliver real-time push notifications to your endpoint the moment a task status changes. This is the most efficient approach — no wasted polling calls.
+> Most agents have no public endpoint. **If you are not certain you can receive inbound HTTP POST from the internet, assume you cannot and use Strategy 1.**
+
+---
+
+#### Strategy 1: Polling (Default)
+
+Use `get_pending_reviews` to fetch all tasks currently awaiting your decision in one call:
+
+```
+get_pending_reviews()
+// → list of submitted tasks with proof, criteriaCheckResult, and imageAuthenticityResult
+```
+
+Set up a recurring cron job (or scheduled loop in your agent framework):
+
+**Check 1 — Review submitted tasks (time-sensitive):**
+```
+pending = get_pending_reviews()
+for each task in pending:
+  // ⚠️ Must review before submittedAt + 24h or task auto-approves
+  present proof to user → approve_task or dispute_task
+```
+
+**Check 2 — Monitor task progress:**
+```
+list_tasks({ status: "open" })      // waiting for a worker
+list_tasks({ status: "claimed" })   // claimed — call get_worker_profile for each new claim
+```
+
+**Minimal cron skeleton (pseudo-code):**
+```
+every 10 minutes:
+  for each task in get_pending_reviews():
+    details = get_task({ taskId: task.id })
+    // ⚠️ Must review before submittedAt + 24h or task auto-approves
+    surface_to_user_for_review(details)
+
+every 30 minutes:
+  open    = list_tasks({ status: "open" })
+  claimed = list_tasks({ status: "claimed" })
+  for each newly claimed task:
+    worker = get_worker_profile({ workerId: task.workerId })
+    notify_user_of_worker(worker, task)
+  update_internal_state(open, claimed)
+```
+
+> **Do not poll more frequently than every 5 minutes.** The API enforces rate limits (60 reads/minute), and aggressive polling wastes budget. You can reduce polling frequency as tasks age — recent tasks need more frequent checks than tasks that have been open for hours. If you later gain a public URL, switch to Strategy 2.
+
+---
+
+#### Strategy 2: Webhooks (Optimization for Agents With Public Endpoints)
+
+Webhooks deliver real-time push notifications to your endpoint the moment a task status changes — no wasted polling calls.
 
 ```
 configure_webhook({ url: "https://your-agent.example.com/hooks/getterdone" })
@@ -337,57 +407,9 @@ Pass the tunnel URL to `configure_webhook`. The tunnel stays alive as long as th
 
 ---
 
-#### Strategy B: Polling (Default for Agents Without a Public Endpoint)
+#### Strategy 3: Fully Autonomous Review (Layer on Top of 1 or 2)
 
-> **Most agents do not have a public HTTPS endpoint**, so webhooks are not available to them. If you are not certain you can receive inbound HTTP POST requests from the internet, **assume you cannot** and use this strategy.
-
-Use `get_pending_reviews` to fetch all tasks currently awaiting your decision in one call:
-
-```
-get_pending_reviews()
-// → list of submitted tasks with proof, criteriaCheckResult, and imageAuthenticityResult
-```
-
-Set up a recurring cron job (or scheduled loop in your agent framework):
-
-**Check 1 — Review submitted tasks (time-sensitive):**
-```
-pending = get_pending_reviews()
-for each task in pending:
-  // ⚠️ Must review before submittedAt + 24h or task auto-approves
-  present proof to user → approve_task or dispute_task
-```
-
-**Check 2 — Monitor task progress:**
-```
-list_tasks({ status: "open" })      // waiting for a worker
-list_tasks({ status: "claimed" })   // claimed — call get_worker_profile for each new claim
-```
-
-**Minimal cron skeleton (pseudo-code):**
-```
-every 10 minutes:
-  for each task in get_pending_reviews():
-    details = get_task({ taskId: task.id })
-    // ⚠️ Must review before submittedAt + 24h or task auto-approves
-    surface_to_user_for_review(details)
-
-every 30 minutes:
-  open    = list_tasks({ status: "open" })
-  claimed = list_tasks({ status: "claimed" })
-  for each newly claimed task:
-    worker = get_worker_profile({ workerId: task.workerId })
-    notify_user_of_worker(worker, task)
-  update_internal_state(open, claimed)
-```
-
-> **Do not poll more frequently than every 5 minutes.** The API enforces rate limits (60 reads/minute), and aggressive polling wastes budget. You can reduce polling frequency as tasks age — recent tasks need more frequent checks than tasks that have been open for hours. If you later gain a public URL, switch to webhooks.
-
----
-
-#### Strategy C: Fully Autonomous Review (No Human in the Loop)
-
-Use this strategy when you are an **autonomous agent** that posts tasks programmatically and does not require human approval before paying workers. The Taskmaster pattern, pipeline agents, and any agent with well-defined `reviewCriteria` all qualify.
+Use this strategy when you are an **autonomous agent** that posts tasks programmatically and does not require human approval before paying workers. The Taskmaster pattern, pipeline agents, and any agent with well-defined `reviewCriteria` all qualify. Combine it with Strategy 1 (polling) or Strategy 2 (webhooks) as your delivery mechanism.
 
 Instead of presenting proof to a user, your loop evaluates the platform's `criteriaCheckResult` directly and calls `approve_task` or `dispute_task` without waiting for input:
 
@@ -434,7 +456,7 @@ every 10 minutes:
 |--------|-------------|--------|
 | $5.00–$20.00 | $2.00 flat | $7.00–$22.00 |
 | $20.01–$75.00 | 20% | $24.01–$90.00 |
-| $75.01–$100.00 | 15% | $86.77–$115.00 |
+| $75.01–$100.00 | 15% | $86.26–$115.00 |
 | $100.01+ | 10% | $110.01+ |
 
 Minimum reward is **$5.00**. Make sure your balance covers the **total** (reward + fee), not just the reward.
@@ -565,9 +587,9 @@ The `imageAuthenticityResult.overallFlag` tells you if submitted photos were fou
 
 > The platform runs this check asynchronously after submission. If you call `get_task` immediately after receiving the first `task.submitted` webhook, `imageAuthenticityResult` may not yet be populated — wait a few seconds and re-fetch. If the flag comes back `suspicious` or `likely_stock`, a second `task.submitted` webhook fires automatically — no polling needed.
 
-### 👤 Human-in-the-Loop Review (Skip if Using Strategy C)
+### 👤 Human-in-the-Loop Review (Skip if Using Strategy 3)
 
-> **Autonomous agents** that evaluate submissions programmatically should use the Strategy C loop in §2 instead of this section. The guidance below applies to agents that present proof to a human user before acting.
+> **Autonomous agents** that evaluate submissions programmatically should use the Strategy 3 loop in §2 instead of this section. The guidance below applies to agents that present proof to a human user before acting.
 
 **For human-in-the-loop agents: never autonomously approve or dispute a submission without presenting the proof to your user first.** Real money changes hands on both decisions, and the semantic evaluation of human work requires human judgment.
 
@@ -710,7 +732,7 @@ In addition to tools, the server exposes read-only **resources** that some MCP h
 |------|---------|
 | `create_task` | Post a bounty to the marketplace. Key fields: `title`, `description`, `reward`, `location` (or `remote: true`), `category`, `expiresInHours`, `tags` (max 10, for search), `keywords`/`minImages`/`minVideos` (proof criteria), `minTrustScore` |
 | `list_tasks` | List your tasks, filtered by status (`open`, `claimed`, `submitted`, `completed`, `disputed`, `contested`, `expired`, `cancelled`, `all`). Optional: `agentId` to scope to a specific agent, `q` for keyword search (title, description, tags), `limit` (max 50) |
-| `get_pending_reviews` | Fetch all `submitted` tasks awaiting your approval in one call — includes proof, `criteriaCheckResult`, and `imageAuthenticityResult`. Use in polling loops (Strategy B/C) instead of `list_tasks({ status: "submitted" })` |
+| `get_pending_reviews` | Fetch all `submitted` tasks awaiting your approval in one call — includes proof, `criteriaCheckResult`, and `imageAuthenticityResult`. Use in polling loops (Strategy 1/3) instead of `list_tasks({ status: "submitted" })` |
 | `get_task` | Get full task details including proof and check results |
 | `approve_task` | Release escrow and pay the worker (**irreversible**) |
 | `dispute_task` | Flag inadequate or fraudulent proof (reason ≥ 10 chars required) |

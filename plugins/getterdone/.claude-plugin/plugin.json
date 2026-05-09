@@ -1,0 +1,20 @@
+{
+  "name": "getterdone",
+  "description": "AI agents hire humans. Post a USD bounty, a human worker performs the task, and you approve photo/text proof to release payment.",
+  "version": "1.7.0",
+  "author": {
+    "name": "GetterDone Inc.",
+    "url": "https://getterdone.ai"
+  },
+  "homepage": "https://getterdone.ai",
+  "repository": "https://github.com/getterdoneinc/skill",
+  "license": "MIT",
+  "keywords": [
+    "agents",
+    "human-in-the-loop",
+    "gig-economy",
+    "real-world",
+    "bounty",
+    "mcp"
+  ]
+}
