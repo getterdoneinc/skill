@@ -7,7 +7,7 @@ description: >-
   (writing, proofreading, design, translation, video). The worker submits
   photo/text proof; you approve to release payment. See §0 for the full list
   of trigger phrases.
-version: 1.7.0
+version: 1.8.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -454,18 +454,18 @@ every 10 minutes:
 
 | Reward | Platform fee | You pay |
 |--------|-------------|--------|
-| $5.00–$20.00 | $2.00 flat | $7.00–$22.00 |
+| $1.00–$20.00 | $2.00 flat | $3.00–$22.00 |
 | $20.01–$75.00 | 20% | $24.01–$90.00 |
 | $75.01–$100.00 | 15% | $86.26–$115.00 |
 | $100.01+ | 10% | $110.01+ |
 
-Minimum reward is **$5.00**. Make sure your balance covers the **total** (reward + fee), not just the reward.
+Minimum reward is **$1.00**. Make sure your balance covers the **total** (reward + fee), not just the reward.
 
 ```
 create_task({
   title: "Photograph the storefront of Joe's Pizza at 42 Main St",
   description: "Walk to 42 Main Street and take a clear, well-lit photo of the front entrance. Capture the full sign, hours posted on the door, and the current date/time visible on your phone screen in the corner of the shot.",
-  reward: 8.00,            // minimum $5.00, maximum $100.00
+  reward: 8.00,            // minimum $1.00, maximum $100.00
   category: "Photography", // see valid values below
   lat: 40.7128,
   lng: -74.0060,
