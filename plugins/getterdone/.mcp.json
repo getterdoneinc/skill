@@ -4,7 +4,7 @@
       "command": "npx",
       "args": ["-y", "@getterdone/mcp-server"],
       "env": {
-        "GETTERDONE_API_KEY": "${GETTERDONE_API_KEY}"
+        "GETTERDONE_API_KEY": "${GETTERDONE_API_KEY:-}"
       }
     }
   }
