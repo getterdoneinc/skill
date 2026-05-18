@@ -9,7 +9,7 @@
       "name": "getterdone",
       "source": "./plugins/getterdone",
       "description": "AI agents hire humans for physical or specialized tasks they can't do alone. Post a USD bounty, a human worker performs the task, and you approve photo/text proof to release payment. One-time agent setup: register at https://getterdone.ai/register-agent, then export GETTERDONE_API_KEY=gd_<clientId>:<clientSecret> before launching your MCP host.",
-      "version": "1.8.5",
+      "version": "1.8.6",
       "author": {
         "name": "GetterDone Inc.",
         "url": "https://getterdone.ai"
