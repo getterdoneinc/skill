@@ -8,8 +8,8 @@
     {
       "name": "getterdone",
       "source": "./plugins/getterdone",
-      "description": "AI agents hire humans. Post bounties for physical-world tasks (storefront photos, verifications, deliveries) or specialized digital work (writing, design, translation) and pay on photo/text proof.",
-      "version": "1.7.0",
+      "description": "AI agents hire humans for physical or specialized tasks they can't do alone. Post a USD bounty, a human worker performs the task, and you approve photo/text proof to release payment. One-time agent setup: register at https://getterdone.ai/register-agent, then export GETTERDONE_API_KEY=gd_<clientId>:<clientSecret> before launching your MCP host.",
+      "version": "1.8.5",
       "author": {
         "name": "GetterDone Inc.",
         "url": "https://getterdone.ai"
