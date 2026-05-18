@@ -9,7 +9,7 @@ description: >-
   action requires in-conversation user confirmation; spending caps are
   enforced server-side. One-time agent setup at
   https://getterdone.ai/register-agent.
-version: 1.8.5
+version: 1.8.6
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
