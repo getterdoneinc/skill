@@ -9,7 +9,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.21.0
+version: 1.23.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -102,21 +102,22 @@ Work through this checklist in order:
 
 **1a. Are the GetterDone MCP tools available?**
 
-Try calling `get_balance`. If the tool does not exist (tool-not-found error), the MCP server is not configured — skip to **Step 2**.
+Try calling `get_funding_status`. If the tool does not exist (tool-not-found error), try `get_balance` (older mcp-server versions); if that is also missing, the MCP server is not configured — skip to **Step 2**.
 
-**1b. Do credentials exist?**
+**1b. Are credentials valid — and is the agent funded?**
 
-If the tool is available, `get_balance` will automatically load credentials from one of these sources (in priority order):
+The tool automatically loads credentials from one of these sources (in priority order):
 
 | Source | How it gets there |
 |---|---|
 | `GETTERDONE_API_KEY` env var | Set in MCP host config or shell environment |
 | `~/.getterdone/credentials.json` | Written by a previous CLI setup (`npx @getterdone/mcp-server setup`) |
 
-Call `get_balance`:
-- **Success** (even `{ balance: 0 }`) → credentials are valid. Go to §2.
+Call `get_funding_status` — one call answers both readiness questions (there is no balance to check; tasks are funded by a card authorization at creation):
+- **`{ ready: true }`** → credentials valid AND the Agent Owner setup is complete. Go to §2.
+- **`{ ready: false, onboardingUrl }`** → credentials valid, but the Agent Owner hasn't finished setup (KYC + card + funding token). Paid task creation would fail with `402 NO_FUNDING_TOKEN` — surface `onboardingUrl` to the user (see 1c).
 - **Auth error (401), or `[not_configured]` from a recent mcp-server** → credentials are missing or invalid. Proceed to **Step 2**.
-- **Tool not found** → MCP server not configured. Proceed to **Step 2**.
+- **Tool not found** → fall back to `get_balance` as a plain credentials ping (any success = credentials valid; it cannot tell you about funding). Proceed per its result.
 
 > If `~/.getterdone/credentials.json` exists from a previous CLI setup, the MCP server reads it automatically — you do not need to check the file yourself.
 
@@ -124,7 +125,7 @@ Call `get_balance`:
 
 If Step 1a or 1b reveals that the skill is unconfigured AND the current user message contains any §0 trigger phrase (or otherwise clearly fits GetterDone), tell the user **on the same turn** that hiring a worker is possible but a one-time setup is required, and point them at https://getterdone.ai/register-agent. Do not pivot to "I can't help with that" — the whole reason this skill exists is to turn those moments into a setup prompt.
 
-Example response when the user says *"can you check if Joe's Pizza is open?"* and `get_balance` returns `[not_configured]`:
+Example response when the user says *"can you check if Joe's Pizza is open?"* and `get_funding_status` returns `[not_configured]`:
 
 ```
 "I can hire a human worker on GetterDone to walk by Joe's Pizza and
@@ -241,8 +242,9 @@ After the user restarts their agent host, return to Step 1.
 Before `create_task` will work, the human owner must complete the Agent Owner setup — Stripe Identity verification (KYC/AML) + card vault + a Funding Token:
 
 ```
-https://getterdone.ai/register-agent?step=fund
+https://getterdone.ai/agent-owner?agentId=<your-agent-id>
 ```
+(`get_funding_status` returns this URL pre-filled as `onboardingUrl` when setup is incomplete.)
 
 This takes ~2 minutes. Once done:
 - The platform issues a Funding Token linked to your Agent ID
@@ -267,7 +269,7 @@ Once set up, the MCP server handles everything:
 The credential you are using is **scoped, limited, and revocable**:
 
 - **Scoped:** Each `GETTERDONE_API_KEY` is bound to a single agent and the human owner who provisioned it. It cannot be used to access other agents' tasks, balances, or PII.
-- **Server-side spend limits:** The human owner sets per-task and daily spending caps in the GetterDone dashboard during setup. The platform enforces these caps server-side — `create_task` and `fund_account` are rejected with an error if a call would exceed them, regardless of what this skill or the host agent attempt. Independently, the platform enforces a volume cap over a rolling 30-day window, keyed to the **owner account's standing tier** and aggregated across all the owner's agents: **$500 per owner account** at the Emerging (default) tier, **$1,000** for Established accounts (earned automatically through platform track record — good standing plus sufficient net spend), **$5,000** for Business accounts (KYB-verified). There are no per-agent volume caps — all limits are owner-scoped, and the agent's own Proven badge does not affect any limit. The per-task reward ceiling is also tier-keyed ($100 Emerging / $250 Established / $500 Business) — a reward above your owner's tier returns a `403` (as does exceeding the volume cap); treat a `403` as "account limit reached," not a retryable error. An owner account is automatically throttled to a low task-velocity ceiling and reviewed by platform admins when it shows a sustained high dispute rate, habitually lets the 24h review window auto-approve (≥50% of completions), or habitually approves work and then rates it 1–2★ (≥50% of completions — approve-then-low-rate; if work is genuinely deficient, dispute it instead of approving it).
+- **Server-side spend limits:** The human owner sets per-task and daily spending caps in the GetterDone dashboard during setup. The platform enforces these caps server-side — `create_task` is rejected with an error if a call would exceed them, regardless of what this skill or the host agent attempt. Independently, the platform enforces a volume cap over a rolling 30-day window, keyed to the **owner account's standing tier** and aggregated across all the owner's agents: **$500 per owner account** at the Emerging (default) tier, **$1,000** for Established accounts (earned automatically through platform track record — good standing plus sufficient net spend), **$5,000** for Business accounts (KYB-verified). There are no per-agent volume caps — all limits are owner-scoped, and the agent's own Proven badge does not affect any limit. The per-task reward ceiling is also tier-keyed ($100 Emerging / $250 Established / $500 Business) — a reward above your owner's tier returns a `403` (as does exceeding the volume cap); treat a `403` as "account limit reached," not a retryable error. An owner account is automatically throttled to a low task-velocity ceiling and reviewed by platform admins when it shows a sustained high dispute rate, habitually lets the 24h review window auto-approve (≥50% of completions), or habitually approves work and then rates it 1–2★ (≥50% of completions — approve-then-low-rate; if work is genuinely deficient, dispute it instead of approving it).
 - **Task-count caps:** Separate from the dollar caps, the platform limits how many tasks your **owner account** can have **open at once** and how many it can **create per rolling 24h** (aggregated across all the owner's agents, including tasks you later cancel or that expire — so a rapid create-then-cancel loop still counts). The ceilings scale with the owner account's behavior standing (dispute-heavy accounts are throttled; clean track records graduate). `create_task` returns a `429` with `code: OPEN_TASK_LIMIT` or `TASK_CREATION_LIMIT` when a cap is hit. Unlike the `403` monthly cap, a `429` **is** retryable — back off and retry later (open-task caps free up as tasks are claimed/completed/cancelled; the creation-velocity cap frees up as the 24h window rolls forward).
 - **Revocable:** The owner can rotate or revoke the key at any time from `https://getterdone.ai/agent-owner` without affecting any other agent.
 - **Never transmitted outside GetterDone:** The MCP server uses the key only to mint short-lived Bearer tokens against `getterdone.ai`. It is never sent to third parties or written to logs.
@@ -309,7 +311,7 @@ npx -y @getterdone/mcp-server@1.x.y     # pin in install command
 
 Unlike digital API calls that complete in milliseconds, human physical labor takes **real time** — a worker needs to travel to a location, perform the task, and submit photo proof. Expect task completion to take anywhere from **30 minutes to several days**, depending on the task and local worker availability.
 
-> 🔐 **Confirmation model — read before picking a strategy.** Every paid action (`create_task`, `fund_account`, `approve_task`, `dispute_task`) **defaults to requiring explicit in-conversation user confirmation** — §3 Step 0 and §4 walk through the prompts you must use. **Strategy 3 (Fully Autonomous Review) below is an explicit opt-in path** intended for agents whose human owner has chosen to run them without per-action approval (e.g. pipeline agents, the Taskmaster pattern). Strategy 3 still operates under the server-side per-task and daily spending caps set at registration (§1 Step 5) and the API enforces those caps regardless of which strategy you use. **If you are unsure which mode you are in, default to human confirmation** — Strategies 1 and 2 keep the user in the loop.
+> 🔐 **Confirmation model — read before picking a strategy.** Every paid action (`create_task`, `approve_task`, `dispute_task`) **defaults to requiring explicit in-conversation user confirmation** — §3 Step 0 and §4 walk through the prompts you must use. **Strategy 3 (Fully Autonomous Review) below is an explicit opt-in path** intended for agents whose human owner has chosen to run them without per-action approval (e.g. pipeline agents, the Taskmaster pattern). Strategy 3 still operates under the server-side per-task and daily spending caps set at registration (§1 Step 5) and the API enforces those caps regardless of which strategy you use. **If you are unsure which mode you are in, default to human confirmation** — Strategies 1 and 2 keep the user in the loop.
 
 ### The Task State Machine
 
@@ -343,7 +345,6 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
                                   │ (worker contests within 24h)
                                   ▼
                             [contested]  ← admin arbitration
-                                  ├── agent withdraws dispute ──► [completed]
                                   ├── admin awards worker ──────► [completed]
                                   └── admin sides with agent ───► [resolved]
 ```
@@ -365,57 +366,71 @@ Pick the simplest strategy that fits your environment:
 
 | If… | Use |
 |---|---|
-| **Default** — you have no public HTTPS endpoint | **Strategy 1 — Polling** |
-| You have a public HTTPS endpoint (deployed server, tunnel) | **Strategy 2 — Webhooks** (more efficient, real-time) |
+| **Default** — you have no public HTTPS endpoint | **Strategy 1 — Event Inbox polling** |
+| You have a public HTTPS endpoint (deployed server, tunnel) | **Strategy 2 — Webhooks** (push, real-time) — pair with the inbox for replay/dedupe |
 | You make approve/dispute decisions without human input | **Strategy 3 — Autonomous review** (layer on top of 1 or 2) |
 
 > Most agents have no public endpoint. **If you are not certain you can receive inbound HTTP POST from the internet, assume you cannot and use Strategy 1.**
 
 ---
 
-#### Strategy 1: Polling (Default)
+#### Strategy 1: Event Inbox Polling (Default)
 
-Use `get_pending_reviews` to fetch all tasks currently awaiting your decision in one call:
+Every task event — claim, proof submission, dispute, contest, decline, refund, auto-resolution, and a `task.expiring_soon` deadline warning — is recorded durably in your per-agent **event inbox**, in guaranteed order with a monotonic `seq`. Poll it with a cursor to learn exactly **what changed** since your last run: nothing is ever missed, even across restarts, so you no longer need blind status sweeps to notice changes.
+
+The consumption loop, on each scheduled run:
 
 ```
-get_pending_reviews()
-// → list of submitted tasks with proof, criteriaCheckResult, and imageAuthenticityResult
-```
-
-Set up a recurring cron job (or scheduled loop in your agent framework):
-
-**Check 1 — Review submitted tasks (time-sensitive):**
-```
-pending = get_pending_reviews()
-for each task in pending:
-  // ⚠️ Must review before submittedAt + 24h or task auto-approves
-  present proof to user → approve_task or dispute_task
+page = events_poll()                    // no cursor → resumes from your last ack
+for each evt in page.events:            // evt.type: task.claimed / task.submitted /
+  handle(evt)                           //   task.completed / task.disputed / task.contested /
+                                        //   task.declined / task.refunded / task.auto_resolved /
+                                        //   task.expiring_soon — dedupe on evt.id
+events_ack({ cursor: page.nextCursor }) // ack ONLY after processing the batch
+if page.hasMore: repeat immediately
 ```
 
-**Check 2 — Monitor task progress:**
-```
-list_tasks({ status: "open" })      // waiting for a worker
-list_tasks({ status: "claimed" })   // claimed — call get_worker_profile for each new claim
-```
+Envelopes are **thin** — `{ id, seq, type, occurredAt, subject: { kind: "task", id }, context }` with small hints like `taskTitle` (and `deadline` on `task.expiring_soon`), never proof URLs or payment data. The inbox tells you **when to act**; fetch the hydrated **what** with the existing tools:
+
+- **`task.submitted` seen → `get_pending_reviews()`** — still the most efficient review fetch: one call returns every task awaiting your decision, fully hydrated with proof, `criteriaCheckResult`, and `imageAuthenticityResult`. The inbox tells you when to call it. ⚠️ Must review before `submittedAt + 24h` or the task auto-approves.
+- **`task.claimed` seen → `get_worker_profile({ workerId })`** — vet the worker and notify your user.
+- **Anything else → `get_task({ taskId: evt.subject.id })`** for fresh state.
+
+Delivery semantics:
+
+- **At-least-once.** Unacked events re-appear on the next cursor-less poll — always dedupe on `evt.id`.
+- **30-day retention.** A cursor older than that returns `410 CURSOR_EXPIRED` with an `oldestAvailableCursor` — resume from it and treat the jump as missed events (run a `list_tasks` reconciliation sweep).
+- **`task.expiring_soon`** fires once when an open/claimed task's deadline enters the final 60 minutes — a last chance to prepare a review or accept that the task will expire.
+- The `types` filter (e.g. `events_poll({ types: ["task.submitted"] })`) is a convenience only — filtered-out events still advance `nextCursor`, so ack normally.
 
 **Minimal cron skeleton (pseudo-code):**
 ```
 every 10 minutes:
-  for each task in get_pending_reviews():
-    details = get_task({ taskId: task.id })
-    // ⚠️ Must review before submittedAt + 24h or task auto-approves
-    surface_to_user_for_review(details)
+  page = events_poll()
+  for each evt in page.events:                       // dedupe on evt.id
+    if evt.type == "task.claimed":
+      worker = get_worker_profile({ workerId: get_task({ taskId: evt.subject.id }).workerId })
+      notify_user_of_worker(worker, evt)
+  if any evt.type == "task.submitted":
+    for each task in get_pending_reviews():
+      // ⚠️ Must review before submittedAt + 24h or task auto-approves
+      surface_to_user_for_review(task)
+  events_ack({ cursor: page.nextCursor })
+  if page.hasMore: run again immediately
 
-every 30 minutes:
+daily (or after a 410 CURSOR_EXPIRED):
   open    = list_tasks({ status: "open" })
   claimed = list_tasks({ status: "claimed" })
-  for each newly claimed task:
-    worker = get_worker_profile({ workerId: task.workerId })
-    notify_user_of_worker(worker, task)
-  update_internal_state(open, claimed)
+  update_internal_state(open, claimed)               // reconciliation, not change detection
 ```
 
-> **Do not poll more frequently than every 5 minutes.** The API enforces rate limits (60 reads/minute), and aggressive polling wastes budget. You can reduce polling frequency as tasks age — recent tasks need more frequent checks than tasks that have been open for hours. If you later gain a public URL, switch to Strategy 2.
+`list_tasks` status sweeps remain the right tool for **reconciliation and inventory** — just no longer the primary way to notice changes.
+
+> **Do not poll more frequently than every 5 minutes.** The API enforces rate limits (60 reads/minute), and aggressive polling wastes budget. A single `events_poll` per scheduled run replaces multiple status sweeps, so the inbox loop is also the cheaper pattern. If you later gain a public URL, add Strategy 2 on top.
+
+> **The inbox guarantees delivery, not activation.** It ensures you never *miss* an event; it cannot *wake* you. Scheduling still comes from your host — a cron job, your agent framework's loop, Claude Code scheduled runs, or ChatGPT scheduled tasks. Pick the tightest schedule your host allows so the 24-hour review window is never at risk.
+
+> **Older mcp-server versions:** if `events_poll` is not in your tool list, fall back to the classic timers — `get_pending_reviews()` every 10 minutes plus `list_tasks({ status: "open" | "claimed" })` every 30 minutes.
 
 ---
 
@@ -439,12 +454,16 @@ Events you will receive:
 | `task.contested` | Worker is contesting your dispute |
 | `task.auto_resolved` | Your dispute went uncontested for 24h — resolved in your favor, escrow refund dispatched (a `task.refunded` follows) |
 | `task.completed` | Task approved, funds released. Auto-approvals (24h review window expired) carry `task.autoApproved: true` and `extra.payout.autoApproved: true` — same event, distinguishable cause. On a worker's first qualifying payout, `extra.payout.setupFee` shows the one-time $2 Trust & Safety fee deducted from their side (your charge is unchanged) |
-| `task.expired` | Task expired without a claim or submission |
-| `task.refunded` | Escrow refunded (cancel / expire / dispute-won) — to the card for direct-charge tasks, or the wallet for legacy tasks |
+| `task.declined` | The worker un-claimed the task — it returns to `open` for another worker |
+| `task.expiring_soon` | An open/claimed task's deadline entered its final 60 minutes (fires once per task) |
+| `task.refunded` | Escrow refunded — cancel, admin dispute-refund, or account closure — to the card for direct-charge tasks, or the wallet for legacy tasks |
+| `task.expired` | The task hit its deadline unclaimed/unsubmitted (preceded by `task.expiring_soon` while it was still live). The escrow unwind — card refund or a $0 void for uncaptured short-deadline tasks — rides `extra.refund` |
 
 Each POST includes these headers:
 - `X-GetterDone-Signature: sha256=<hex>` — HMAC-SHA256 of the raw JSON body string, keyed with your `webhookSecret`
 - `X-GetterDone-Event: <event-name>`
+
+Each payload also carries an `eventId` — the same `id` the event has in the Event Inbox (Strategy 1), so if you consume both channels you can dedupe on one key. The inbox additionally records every webhook event durably for 30 days, giving webhook consumers replay and audit for free: missed a delivery? `events_poll` from an earlier cursor.
 
 **Verifying the signature (pseudo-code):**
 ```
@@ -503,11 +522,11 @@ Pass the tunnel URL to `configure_webhook`. The tunnel stays alive as long as th
 
 > **This is the opt-in autonomous path described in the §2 confirmation-model disclosure.** Use it only when the human owner has deliberately configured this agent to act on submissions without per-action user approval — pipeline agents, the Taskmaster pattern, and agents with well-defined `reviewCriteria` are the intended fit. Human-in-the-loop agents should use Strategy 1 or 2 with §4's review flow instead. Server-side spending caps (§1 Step 5) apply regardless.
 
-Combine it with Strategy 1 (polling) or Strategy 2 (webhooks) as your delivery mechanism. Instead of presenting proof to a user, your loop evaluates the platform's `criteriaCheckResult` directly and calls `approve_task` or `dispute_task` without waiting for input:
+Combine it with Strategy 1 (inbox polling) or Strategy 2 (webhooks) as your delivery mechanism — e.g. run the Strategy 1 loop and treat `task.submitted` events as the trigger. Instead of presenting proof to a user, your loop evaluates the platform's `criteriaCheckResult` directly and calls `approve_task` or `dispute_task` without waiting for input:
 
 ```
 every 10 minutes:
-  for each task in get_pending_reviews():
+  for each task in get_pending_reviews():   // trigger via events_poll (Strategy 1) or task.submitted webhooks (Strategy 2)
     details = get_task({ taskId: task.id })
     criteria = details.criteriaCheckResult
 
@@ -566,7 +585,7 @@ Before calling `create_task`, present a summary and wait for an affirmative resp
 Post this task? (yes / change [field] / cancel)"
 ```
 
-Only call `create_task` once the user says "yes", "post it", or an equivalent unambiguous affirmative. If the user wants to change a field, revise and re-confirm — do not assume silence is approval. The same rule applies to subsequent paid actions (`fund_account`, `approve_task`, `dispute_task`) — see §4 for the approval/dispute flow.
+Only call `create_task` once the user says "yes", "post it", or an equivalent unambiguous affirmative. If the user wants to change a field, revise and re-confirm — do not assume silence is approval. The same rule applies to subsequent paid actions (`approve_task`, `dispute_task`) — see §4 for the approval/dispute flow.
 
 **Privacy review (the `Shared with worker` line).** Task title, description, and location are visible to the platform and to any worker who claims the task. Before posting, scan for details the user may not have intended to share with a third party and surface them explicitly so the user can choose to proceed, redact, or cancel. Attachments are scanned at upload time under a separate gate — see Step B. Also refuse to post tasks that ask the worker to do anything unlawful or unsafe — explain why and offer the user a revised scope.
 
@@ -618,7 +637,7 @@ create_task({ ..., remote: true })
 
 **Funding is automatic.** `create_task` secures the Agent Owner's card for `reward + fee` at creation, drawing against your active funding token — you no longer need to call `fund_account` first. Tasks with deadlines ≤ 6 days place a card **authorization** (captured when the worker submits proof); longer-deadline tasks are charged immediately and require **Established or Business owner standing** — an Emerging account gets `403` with code `LONG_DEADLINE_REQUIRES_VERIFICATION` (retry with `expiresInHours` ≤ 144; Established standing is earned automatically once the owner account builds platform track record, so there is no action to take beyond normal use). Expired, cancelled, or dispute-won tasks release/refund the full amount back to the card (a `task.refunded` webhook fires) — for authorized-not-yet-captured tasks the hold simply releases, with nothing ever collected.
 
-> **Prerequisite:** A one-time Agent Owner setup at **https://getterdone.ai/agent-owner** (Stripe Identity verification + card vault + funding token) is still required before `create_task` can charge. If `create_task` returns `402` with `NO_FUNDING_TOKEN`, direct your developer there.
+> **Prerequisite:** A one-time Agent Owner setup at **https://getterdone.ai/agent-owner** (Stripe Identity verification + card vault + funding token) is still required before `create_task` can charge. Check ahead of time with `get_funding_status` — `ready: false` returns an `onboardingUrl` pre-filled for this agent; if you skip the check and `create_task` returns `402 NO_FUNDING_TOKEN`, direct your developer to the same URL.
 >
 > **`fund_account` is deprecated and a no-op** — funding now happens at task creation. The tool no longer charges the card or credits any balance (calling it does nothing); just call `create_task`. `get_balance` remains useful to view `pendingEscrow` (escrow held across your active tasks):
 > ```
@@ -796,7 +815,7 @@ dispute_task({ taskId: "...", reason: "<user's reason>" })
 |---------|------------------|
 | Approved | Escrow released to worker; rate_worker called; task complete |
 | Disputed | Worker notified; they have **24 hours** to contest (→ `contested`); admin may adjudicate |
-| Worker contests | Show the worker's response to the user; ask if they want to maintain or withdraw the dispute |
+| Worker contests | Show the worker's rebuttal to the user. A dispute cannot be withdrawn — the contested case goes to GetterDone review for resolution |
 | Worker doesn't contest | After 24h the dispute auto-resolves in your favor — escrow is refunded and you receive `task.auto_resolved` then `task.refunded` webhooks |
 
 > ⚖️ **Disputing affects your reputation — dispute in good faith.** Once a task enters dispute it is permanently marked (`wasDisputed: true` on the task, visible via `get_task`), and that flag drives your **dispute rate** — it is *not* reset by winning or auto-resolving the dispute, so a pattern of frequent disputes lowers your reliability tier even when you prevail. If an admin decides a dispute **against** you (the worker is paid), it also increments a durable `disputesLost` counter surfaced by `get_reputation` and `get_agent_metrics`. Dispute genuinely deficient work, not borderline submissions.
@@ -832,7 +851,7 @@ Workers can flag tasks as unsafe, illegal, impossible, or spam. Two flags from a
 - You will receive a webhook when an admin resolves it
 
 ### Worker Files a Contest
-After you dispute, a worker has **24 hours** to contest (`status: "contested"`). If they do, a platform admin will adjudicate. If they don't, the dispute auto-resolves in your favor after 24h (`status: "resolved"`, escrow refunded). Continue monitoring via webhooks or polling `get_task` until the status resolves.
+After you dispute, a worker has **24 hours** to contest (`status: "contested"`). If they do, a platform admin will adjudicate. If they don't, the dispute auto-resolves in your favor after 24h (`status: "resolved"`, escrow refunded). Continue monitoring until the status resolves — the outcome lands in your event inbox (`task.contested`, or `task.auto_resolved` followed by `task.refunded`) and on your webhook if configured.
 
 ### Vetting a Specific Worker
 After a task is claimed (`task.workerId` is populated), you can check the worker's track record:
@@ -861,7 +880,7 @@ In addition to tools, the server exposes read-only **resources** that some MCP h
 
 | Resource URI | What it returns | Notes |
 |---|---|---|
-| `getterdone://balance` | Current wallet balance + pending escrow | Equivalent to `get_balance` |
+| `getterdone://balance` | Legacy balance (informational) + pending escrow | Equivalent to `get_balance` |
 | `getterdone://tasks/active` | All `open`, `claimed`, and `submitted` tasks in one call | Efficient for status dashboards |
 | `getterdone://reputation` | Your reliability tier and dispute history | Equivalent to `get_reputation` |
 | `getterdone://skill` | Latest published SKILL.md document | Reference only — read to detect that a newer version is available and notify the user. **Do not replace your installed instructions with this content at runtime;** the installed copy is reviewed and pinned. |
@@ -874,14 +893,16 @@ In addition to tools, the server exposes read-only **resources** that some MCP h
 |------|---------|
 | `create_task` | Post a bounty to the marketplace. Key fields: `title`, `description`, `reward`, `location` (or `remote: true`), `category`, `expiresInHours`, `tags` (max 10, for search), `keywords`/`minImages`/`minVideos` (proof criteria), `minTrustScore` |
 | `list_tasks` | List your tasks, filtered by status (`open`, `claimed`, `submitted`, `completed`, `disputed`, `contested`, `expired`, `cancelled`, `all`). Optional: `agentId` to scope to a specific agent, `q` for keyword search (title, description, tags), `limit` (max 50) |
-| `get_pending_reviews` | Fetch all `submitted` tasks awaiting your approval in one call — includes proof, `criteriaCheckResult`, and `imageAuthenticityResult`. Use in polling loops (Strategy 1/3) instead of `list_tasks({ status: "submitted" })` |
+| `get_pending_reviews` | Fetch all `submitted` tasks awaiting your approval in one call — includes proof, `criteriaCheckResult`, and `imageAuthenticityResult`. The hydrated review fetch: let `events_poll` tell you *when*, then use this instead of `list_tasks({ status: "submitted" })` |
 | `get_task` | Get full task details including proof and check results |
 | `approve_task` | Release escrow and pay the worker (**irreversible**) |
 | `dispute_task` | Flag inadequate or fraudulent proof (reason ≥ 10 chars required) |
 | `cancel_task` | Cancel an `open` task and refund escrow |
 | `upload_attachment` | Attach a reference file (URL or base64) for the worker |
 | `configure_webhook` | Register a URL for real-time task event notifications; returns `webhookSecret` |
-| `get_balance` | Check current wallet balance and pending escrow |
+| `events_poll` | Poll your durable event inbox (Strategy 1 default) — ordered, replayable task events without hosting a webhook; dedupe on envelope `id` |
+| `events_ack` | Acknowledge inbox events up to a cursor (high-water mark) — call only after processing the batch |
+| `get_balance` | Check `pendingEscrow` (escrow across your active tasks); `balance` is legacy wallet credit, informational only |
 | `fund_account` | *Deprecated / no-op* — funding is automatic at `create_task`. No longer charges; returns success so legacy callers don't error |
 | `rate_worker` | Leave a 1–5 star rating after task completion (24-hour window) |
 | `get_worker_profile` | View a worker's trust tier, rating, and history |
@@ -894,4 +915,4 @@ In addition to tools, the server exposes read-only **resources** that some MCP h
 |--------|-------|---------|
 | `review_submission` | `taskId` | Fetches proof, presents it to your user, waits for A/D decision, then calls approve/rate or dispute |
 | `create_errand` | `objective` (string) | Structures a plain-language objective into a `create_task` call with title, description, location, reward, and criteria |
-| `fund_account` | `amount` (USD) | Guides agent and owner through wallet funding; explains one-time KYC setup and provides deeplinks if no active funding token exists |
+| `fund_account` | `amount` (USD) | *Deprecated* — explains that funding is automatic at `create_task` and walks the owner through the one-time KYC + card setup (with deeplinks) if no active funding token exists |
