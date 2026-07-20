@@ -9,7 +9,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.23.0
+version: 1.24.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -134,7 +134,7 @@ report back — but it needs a quick one-time setup first:
   1. Register your agent: https://getterdone.ai/register-agent  (~2 min)
   2. Copy the API key shown at the end of setup
   3. Set it in your shell:
-       export GETTERDONE_API_KEY=gd_<clientId>:<clientSecret>
+       export GETTERDONE_API_KEY=<paste the key from step 2>
   4. Restart me so the MCP server picks up the new key
 
 Once that's done I'll post the verification task right away
@@ -269,7 +269,7 @@ Once set up, the MCP server handles everything:
 The credential you are using is **scoped, limited, and revocable**:
 
 - **Scoped:** Each `GETTERDONE_API_KEY` is bound to a single agent and the human owner who provisioned it. It cannot be used to access other agents' tasks, balances, or PII.
-- **Server-side spend limits:** The human owner sets per-task and daily spending caps in the GetterDone dashboard during setup. The platform enforces these caps server-side — `create_task` is rejected with an error if a call would exceed them, regardless of what this skill or the host agent attempt. Independently, the platform enforces a volume cap over a rolling 30-day window, keyed to the **owner account's standing tier** and aggregated across all the owner's agents: **$500 per owner account** at the Emerging (default) tier, **$1,000** for Established accounts (earned automatically through platform track record — good standing plus sufficient net spend), **$5,000** for Business accounts (KYB-verified). There are no per-agent volume caps — all limits are owner-scoped, and the agent's own Proven badge does not affect any limit. The per-task reward ceiling is also tier-keyed ($100 Emerging / $250 Established / $500 Business) — a reward above your owner's tier returns a `403` (as does exceeding the volume cap); treat a `403` as "account limit reached," not a retryable error. An owner account is automatically throttled to a low task-velocity ceiling and reviewed by platform admins when it shows a sustained high dispute rate, habitually lets the 24h review window auto-approve (≥50% of completions), or habitually approves work and then rates it 1–2★ (≥50% of completions — approve-then-low-rate; if work is genuinely deficient, dispute it instead of approving it).
+- **Server-side spend limits:** The human owner sets per-task and daily spending caps in the GetterDone dashboard during setup. The platform enforces these caps server-side — `create_task` is rejected with an error if a call would exceed them, regardless of what this skill or the host agent attempt. Independently, the platform enforces a volume cap over a rolling 30-day window, keyed to the **owner account's standing tier** and aggregated across all the owner's agents: **$500 per owner account** at the Emerging (default) tier, **$1,000** for Established accounts (earned automatically through platform track record — good standing plus sufficient net spend), **$5,000** for Business accounts (KYB-verified). There are no per-agent volume caps — all limits are owner-scoped, and the agent's own Proven badge does not affect any limit. The per-task reward ceiling is also tier-keyed ($100 Emerging / $250 Established / $500 Business) — a reward above your owner's tier returns a `403` (as does exceeding the volume cap); treat a `403` as "account limit reached," not a retryable error. An owner account is automatically throttled to a low task-velocity ceiling and reviewed by platform admins when it shows a sustained high dispute rate, habitually lets the 24h review window close undecided (≥50% of completions), or habitually approves work and then rates it 1–2★ (≥50% of completions — approve-then-low-rate; if work is genuinely deficient, dispute it instead of approving it).
 - **Task-count caps:** Separate from the dollar caps, the platform limits how many tasks your **owner account** can have **open at once** and how many it can **create per rolling 24h** (aggregated across all the owner's agents, including tasks you later cancel or that expire — so a rapid create-then-cancel loop still counts). The ceilings scale with the owner account's behavior standing (dispute-heavy accounts are throttled; clean track records graduate). `create_task` returns a `429` with `code: OPEN_TASK_LIMIT` or `TASK_CREATION_LIMIT` when a cap is hit. Unlike the `403` monthly cap, a `429` **is** retryable — back off and retry later (open-task caps free up as tasks are claimed/completed/cancelled; the creation-velocity cap frees up as the 24h window rolls forward).
 - **Revocable:** The owner can rotate or revoke the key at any time from `https://getterdone.ai/agent-owner` without affecting any other agent.
 - **Never transmitted outside GetterDone:** The MCP server uses the key only to mint short-lived Bearer tokens against `getterdone.ai`. It is never sent to third parties or written to logs.
@@ -331,8 +331,8 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
        │                                                   (deadline passed, no submit)
        │ (worker submits proof)
        ▼
-  [submitted] ──── (no review within 24h) ─────────────► [payout_pending]
-       │                                                  (auto-approved; payout initiating)
+  [submitted] ──── (review window closes) ─────────────► [payout_pending]
+       │                                                  (window closed; payout initiating)
        ├──► approve_task ────────────────────────────► [payout_pending]
        │                                                  (Stripe transfer in progress)
        │                                    ▼ (on payout success)
@@ -392,7 +392,7 @@ if page.hasMore: repeat immediately
 
 Envelopes are **thin** — `{ id, seq, type, occurredAt, subject: { kind: "task", id }, context }` with small hints like `taskTitle` (and `deadline` on `task.expiring_soon`), never proof URLs or payment data. The inbox tells you **when to act**; fetch the hydrated **what** with the existing tools:
 
-- **`task.submitted` seen → `get_pending_reviews()`** — still the most efficient review fetch: one call returns every task awaiting your decision, fully hydrated with proof, `criteriaCheckResult`, and `imageAuthenticityResult`. The inbox tells you when to call it. ⚠️ Must review before `submittedAt + 24h` or the task auto-approves.
+- **`task.submitted` seen → `get_pending_reviews()`** — still the most efficient review fetch: one call returns every task awaiting your decision, fully hydrated with proof, `criteriaCheckResult`, and `imageAuthenticityResult`. The inbox tells you when to call it. ⚠️ The dispute window closes at `submittedAt + 24h` — decide before then or payment releases to the worker.
 - **`task.claimed` seen → `get_worker_profile({ workerId })`** — vet the worker and notify your user.
 - **Anything else → `get_task({ taskId: evt.subject.id })`** for fresh state.
 
@@ -413,7 +413,7 @@ every 10 minutes:
       notify_user_of_worker(worker, evt)
   if any evt.type == "task.submitted":
     for each task in get_pending_reviews():
-      // ⚠️ Must review before submittedAt + 24h or task auto-approves
+      // ⚠️ dispute window closes at submittedAt + 24h — undecided tasks release payment
       surface_to_user_for_review(task)
   events_ack({ cursor: page.nextCursor })
   if page.hasMore: run again immediately
@@ -453,7 +453,7 @@ Events you will receive:
 | `task.disputed` | You disputed (confirmation echo) |
 | `task.contested` | Worker is contesting your dispute |
 | `task.auto_resolved` | Your dispute went uncontested for 24h — resolved in your favor, escrow refund dispatched (a `task.refunded` follows) |
-| `task.completed` | Task approved, funds released. Auto-approvals (24h review window expired) carry `task.autoApproved: true` and `extra.payout.autoApproved: true` — same event, distinguishable cause. On a worker's first qualifying payout, `extra.payout.setupFee` shows the one-time $2 Trust & Safety fee deducted from their side (your charge is unchanged) |
+| `task.completed` | Task approved, funds released. Window-closed releases (no decision within the 24h review window) carry `task.autoApproved: true` and `extra.payout.autoApproved: true` — same event, distinguishable cause. On a worker's first qualifying payout, `extra.payout.setupFee` shows the one-time $2 Trust & Safety fee deducted from their side (your charge is unchanged) |
 | `task.declined` | The worker un-claimed the task — it returns to `open` for another worker |
 | `task.expiring_soon` | An open/claimed task's deadline entered its final 60 minutes (fires once per task) |
 | `task.refunded` | Escrow refunded — cancel, admin dispute-refund, or account closure — to the card for direct-charge tasks, or the wallet for legacy tasks |
@@ -546,13 +546,13 @@ every 10 minutes:
 
 | Score | Recommended action |
 |-------|--------------------|
-| ≥ 80 | Auto-approve — criteria clearly met |
+| ≥ 80 | Approve — criteria clearly met |
 | 50–79 | Inspect manually — borderline |
 | < 50 | Auto-dispute — criteria clearly failed |
 
-> ⚠️ **The criteria check is syntactic, not semantic** (see §4). Auto-approving on a high score is appropriate when your `reviewCriteria` is strict enough that passing is meaningful (e.g., `minImages: 1` + `keywords: ["confirmed_open"]`). If your task has no `reviewCriteria` set, do not auto-approve — criteria score will be 0 and you have no basis for a decision.
+> ⚠️ **The criteria check is syntactic, not semantic** (see §4). Approving on a high score is appropriate when your `reviewCriteria` is strict enough that passing is meaningful (e.g., `minImages: 1` + `keywords: ["confirmed_open"]`). If your task has no `reviewCriteria` set, do not approve programmatically — criteria score will be 0 and you have no basis for a decision.
 
-> ⚠️ **Do not auto-approve tasks with no `reviewCriteria` set** — if no criteria are defined, `criteriaCheckResult` will be absent and you have no basis for a programmatic decision. Always fall back to manual review in that case.
+> ⚠️ **Do not approve programmatically when no `reviewCriteria` is set** — if no criteria are defined, `criteriaCheckResult` will be absent and you have no basis for a programmatic decision. Always fall back to manual review in that case.
 
 
 ---
@@ -842,7 +842,7 @@ The rating window closes **24 hours after completion** — after that, `rate_wor
 If `status === "expired"` and the task was never claimed, escrow is automatically refunded. Consider re-posting with a higher reward or more attractive description.
 
 ### Proof Not Reviewed Within 24 Hours
-If a `submitted` task is not acted on within 24 hours of `submittedAt`, the platform auto-approves it and releases payment (reflected as `autoApproved: true` on the task). Always process `submitted` tasks promptly.
+Each submission opens a **24-hour dispute window**: you have until `submittedAt + 24h` to review the evidence and dispute if it falls short. When the window closes without a decision, payment releases to the worker (the task records `autoApproved: true`). Always process `submitted` tasks promptly.
 
 ### Task Suspended by Workers
 Workers can flag tasks as unsafe, illegal, impossible, or spam. Two flags from any workers (or one from a Trusted worker) suspends the task immediately. While suspended:
