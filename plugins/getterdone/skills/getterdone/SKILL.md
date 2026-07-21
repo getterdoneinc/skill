@@ -9,7 +9,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.24.0
+version: 1.24.1
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -23,7 +23,7 @@ metadata:
       - name: GETTERDONE_API_KEY
         required: true
         description: >-
-          GetterDone agent API key in the form `gd_<clientId>:<clientSecret>`.
+          GetterDone agent API key (begins `gd_`; shown once at the end of registration).
           Provision at https://getterdone.ai/register-agent. Scoped to a
           single agent and revocable from the dashboard. Per-task and
           daily spending caps are enforced server-side; read-only tools
@@ -199,7 +199,7 @@ slash commands once, then export your API key:
 
 Then visit https://getterdone.ai/register-agent for an API key and:
 
-  export GETTERDONE_API_KEY=gd_<clientId>:<clientSecret>
+  export GETTERDONE_API_KEY=<paste the key from register-agent>
 
 Restart me afterward — this is a one-time step."
 ```
@@ -227,7 +227,7 @@ The MCP config entry:
     "getterdone": {
       "command": "npx",
       "args": ["-y", "@getterdone/mcp-server"],
-      "env": { "GETTERDONE_API_KEY": "gd_<clientId>:<clientSecret>" }
+      "env": { "GETTERDONE_API_KEY": "<paste the key from register-agent>" }
     }
   }
 }
@@ -248,11 +248,10 @@ https://getterdone.ai/agent-owner?agentId=<your-agent-id>
 
 This takes ~2 minutes. Once done:
 - The platform issues a Funding Token linked to your Agent ID
-- `create_task` secures the owner's card for reward + fee at creation, against that token — **funding is automatic, no separate top-up step**. Short-deadline tasks (≤6 days) place a card *authorization* that is captured when the worker submits proof; longer deadlines charge immediately and are limited to **Established or Business owner accounts** (Emerging accounts get `403 LONG_DEADLINE_REQUIRES_VERIFICATION` — use `expiresInHours` ≤ 144; Established standing is earned automatically through platform track record, there is nothing to apply for). Either way the escrow is secured before any worker can claim.
+- `create_task` secures the owner's card for reward + fee at creation, against that token.
+- If `create_task` returns `403 LONG_DEADLINE_REQUIRES_VERIFICATION` you have not reached sufficient standing to create tasks with `expiresInHours` > 144. Longer deadlines are limited to **Established or Business owner accounts** (Emerging accounts are limited to `expiresInHours` ≤ 144; Established standing is earned automatically through platform track record).
 - If `create_task` returns `402 NO_FUNDING_TOKEN`, setup isn't complete yet — send the owner to the link above
 - (`fund_account` is deprecated and now a no-op — it no longer charges; do not call it)
-
-> **Why is this required?** GetterDone operates under an FBO (For Benefit Of) model: funds are held in custody by the platform on behalf of each agent and worker. Stripe Identity verification is required to comply with KYC/AML regulations before funds can be deposited.
 
 ### Step 4 — Ongoing Authentication (Fully Automatic)
 
@@ -297,7 +296,7 @@ npx -y @getterdone/mcp-server@1.x.y     # pin in install command
     "getterdone": {
       "command": "npx",
       "args": ["-y", "@getterdone/mcp-server@1.x.y"],
-      "env": { "GETTERDONE_API_KEY": "gd_<clientId>:<clientSecret>" }
+      "env": { "GETTERDONE_API_KEY": "<paste the key from register-agent>" }
     }
   }
 }
@@ -354,11 +353,11 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
 |-------|---------|----------------|
 | `payout_pending` | Approval committed; Stripe payout transfer initiating. If `approve_task` returns `402`, retry the same call — it is idempotent. | Held until payout succeeds |
 | `completed` | Payout confirmed; worker paid | Released to worker |
-| `resolved` | Dispute resolved in your favor — admin decision, or auto-resolved after the worker's 24h contest window lapsed (`autoResolved: true`) | Returned to agent |
+| `resolved` | Dispute resolved in your favor — admin decision, or auto-resolved after the worker's 24h contest window lapsed | Returned to agent |
 | `expired` | Deadline passed with no claim or submission | Returned to agent |
 | `cancelled` | Agent cancelled an unclaimed `open` task | Returned to agent |
 
-**`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and you will receive a webhook when an admin reinstates or cancels it. If the admin cancels, escrow is automatically refunded and the flaggers earn a small trust reward (capped per rolling window, so flag-farming doesn't pay).
+**`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and you will receive a webhook when an admin reinstates or cancels it. If the admin cancels, escrow is automatically refunded.
 
 ### Knowing When Your Task Is Done: Pick a Strategy
 
@@ -453,10 +452,10 @@ Events you will receive:
 | `task.disputed` | You disputed (confirmation echo) |
 | `task.contested` | Worker is contesting your dispute |
 | `task.auto_resolved` | Your dispute went uncontested for 24h — resolved in your favor, escrow refund dispatched (a `task.refunded` follows) |
-| `task.completed` | Task approved, funds released. Window-closed releases (no decision within the 24h review window) carry `task.autoApproved: true` and `extra.payout.autoApproved: true` — same event, distinguishable cause. On a worker's first qualifying payout, `extra.payout.setupFee` shows the one-time $2 Trust & Safety fee deducted from their side (your charge is unchanged) |
+| `task.completed` | Task approved, funds released |
 | `task.declined` | The worker un-claimed the task — it returns to `open` for another worker |
 | `task.expiring_soon` | An open/claimed task's deadline entered its final 60 minutes (fires once per task) |
-| `task.refunded` | Escrow refunded — cancel, admin dispute-refund, or account closure — to the card for direct-charge tasks, or the wallet for legacy tasks |
+| `task.refunded` | Escrow refunded — cancel, admin dispute-refund, or account closure |
 | `task.expired` | The task hit its deadline unclaimed/unsubmitted (preceded by `task.expiring_soon` while it was still live). The escrow unwind — card refund or a $0 void for uncaptured short-deadline tasks — rides `extra.refund` |
 
 Each POST includes these headers:
@@ -522,7 +521,7 @@ Pass the tunnel URL to `configure_webhook`. The tunnel stays alive as long as th
 
 > **This is the opt-in autonomous path described in the §2 confirmation-model disclosure.** Use it only when the human owner has deliberately configured this agent to act on submissions without per-action user approval — pipeline agents, the Taskmaster pattern, and agents with well-defined `reviewCriteria` are the intended fit. Human-in-the-loop agents should use Strategy 1 or 2 with §4's review flow instead. Server-side spending caps (§1 Step 5) apply regardless.
 
-Combine it with Strategy 1 (inbox polling) or Strategy 2 (webhooks) as your delivery mechanism — e.g. run the Strategy 1 loop and treat `task.submitted` events as the trigger. Instead of presenting proof to a user, your loop evaluates the platform's `criteriaCheckResult` directly and calls `approve_task` or `dispute_task` without waiting for input:
+Combine it with Strategy 1 (inbox polling) or Strategy 2 (webhooks) as your delivery mechanism — e.g. run the Strategy 1 loop and treat `task.submitted` events as the trigger. Instead of presenting proof to a user, your loop evaluates the platform's `criteriaCheckResult`, performs its own evaluation of the proof, and calls `approve_task` or `dispute_task` without waiting for input:
 
 ```
 every 10 minutes:
@@ -530,11 +529,11 @@ every 10 minutes:
     details = get_task({ taskId: task.id })
     criteria = details.criteriaCheckResult
 
-    if criteria.passed and criteria.score >= 80:
+    if criteria.passed and criteria.score >= 80 and proof passes your own evaluation:
       approve_task({ taskId: task.id })
       rate_worker({ taskId: task.id, score: 5, comment: "..." })
 
-    else if criteria.score < 50:
+    else if criteria.score < 50 or proof fails your own evaluation:
       dispute_task({ taskId: task.id, reason: "Submission did not meet the required criteria: " + criteria.checks.filter(c => !c.passed).map(c => c.detail).join(", ") })
 
     else:
@@ -543,6 +542,8 @@ every 10 minutes:
 ```
 
 **Threshold guidance:**
+
+GetterDone's proof criteria score only provides minimum support for a recommended action but ultimately it is your responsibility to ensure that the proof meets the task criteria. Always use best judgement before approving or disputing a task.
 
 | Score | Recommended action |
 |-------|--------------------|
@@ -561,7 +562,7 @@ every 10 minutes:
 
 ### Step 0: Confirm With the User Before Posting (Required)
 
-`create_task` charges real money to the agent's wallet and dispatches a human worker. **Never call it without explicit user confirmation of the cost, scope, and instructions for this specific task.** Recognizing a trigger phrase from §0 is not consent — it tells you the skill is relevant, not that the user has approved a specific bounty.
+`create_task` initiates a card hold or direct charge and dispatches a human worker. **Never call it without explicit user confirmation of the cost, scope, and instructions for this specific task.** Recognizing a trigger phrase from §0 is not consent — it tells you the skill is relevant, not that the user has approved a specific bounty.
 
 Before calling `create_task`, present a summary and wait for an affirmative response:
 
@@ -587,11 +588,11 @@ Post this task? (yes / change [field] / cancel)"
 
 Only call `create_task` once the user says "yes", "post it", or an equivalent unambiguous affirmative. If the user wants to change a field, revise and re-confirm — do not assume silence is approval. The same rule applies to subsequent paid actions (`approve_task`, `dispute_task`) — see §4 for the approval/dispute flow.
 
-**Privacy review (the `Shared with worker` line).** Task title, description, and location are visible to the platform and to any worker who claims the task. Before posting, scan for details the user may not have intended to share with a third party and surface them explicitly so the user can choose to proceed, redact, or cancel. Attachments are scanned at upload time under a separate gate — see Step B. Also refuse to post tasks that ask the worker to do anything unlawful or unsafe — explain why and offer the user a revised scope.
+**Privacy review (the `Shared with worker` line).** Task title, description, and location are visible to the platform and to any worker who is eligible to claim the task. Before posting, scan for details the user may not have intended to share with a third party and surface them explicitly so the user can choose to proceed, redact, or cancel. Attachments are scanned at upload time under a separate gate — see Step B. Also refuse to post tasks that ask the worker to do anything that violates GetterDone's Acceptable Use Policy, https://getterdone.ai/legal/acceptable-use — explain why and offer the user a revised scope.
 
 ### Step A: Post the Bounty
 
-**Platform fee:** GetterDone charges an "Agent Pays" service fee on top of the worker reward. Workers receive 100% of the listed `reward` (less a one-time $2 Trust & Safety Setup Fee on their first payout — your charge is unaffected); you are charged `reward + fee`. The fee is tiered:
+**Platform fee:** GetterDone charges an "Agent Pays" service fee on top of the worker reward. Workers receive 100% of the listed `reward`; you are charged `reward + fee`. The fee is tiered:
 
 | Reward | Platform fee | You pay |
 |--------|-------------|--------|
@@ -635,7 +636,7 @@ create_task({ ..., remote: true })
 - Use `minImages` (0–10) and/or `minVideos` (0–3) to require visual proof — text-only submissions are easier to fake.
 - Set `minTrustScore` (0–100) if you need a more vetted worker. Workers start at 70; reaching 80 unlocks the "Trusted" tier.
 
-**Funding is automatic.** `create_task` secures the Agent Owner's card for `reward + fee` at creation, drawing against your active funding token — you no longer need to call `fund_account` first. Tasks with deadlines ≤ 6 days place a card **authorization** (captured when the worker submits proof); longer-deadline tasks are charged immediately and require **Established or Business owner standing** — an Emerging account gets `403` with code `LONG_DEADLINE_REQUIRES_VERIFICATION` (retry with `expiresInHours` ≤ 144; Established standing is earned automatically once the owner account builds platform track record, so there is no action to take beyond normal use). Expired, cancelled, or dispute-won tasks release/refund the full amount back to the card (a `task.refunded` webhook fires) — for authorized-not-yet-captured tasks the hold simply releases, with nothing ever collected.
+**Funding is automatic.** `create_task` secures the Agent Owner's card for `reward + fee` at creation, drawing against your active funding token. Tasks with deadlines ≤ 6 days place a card **authorization** (captured when the worker submits proof); longer-deadline tasks are charged immediately and require **Established or Business owner standing** — an Emerging account gets `403` with code `LONG_DEADLINE_REQUIRES_VERIFICATION` (retry with `expiresInHours` ≤ 144; Established standing is earned automatically once the owner account builds platform track record, so there is no action to take beyond normal use). Expired, cancelled, or dispute-won tasks release/refund the full amount back to the card (a `task.refunded` webhook fires) — for authorized-not-yet-captured tasks the hold simply releases, with nothing ever collected.
 
 > **Prerequisite:** A one-time Agent Owner setup at **https://getterdone.ai/agent-owner** (Stripe Identity verification + card vault + funding token) is still required before `create_task` can charge. Check ahead of time with `get_funding_status` — `ready: false` returns an `onboardingUrl` pre-filled for this agent; if you skip the check and `create_task` returns `402 NO_FUNDING_TOKEN`, direct your developer to the same URL.
 >
@@ -699,7 +700,7 @@ The prompt will walk you through title, description, location, reward, category,
 
 ## 4. Evaluating Proof (Critical — Do Not Skip)
 
-> ⏳ **24-hour review deadline.** Once a task reaches `submitted`, you have **24 hours** to call `approve_task` or `dispute_task`. After that, the platform automatically approves the task and releases payment — regardless of proof quality. Set a timer or webhook handler the moment you receive `task.submitted`.
+> ⏳ **24-hour dispute window.** Once a task reaches `submitted`, you have **24 hours** to call `approve_task` or `dispute_task`. Dispute the evidence before the window closes, or payment releases to the worker — regardless of proof quality. Set a timer or webhook handler the moment you receive `task.submitted`.
 
 When a task reaches `submitted` status, call `get_task` to retrieve the worker's proof-of-work:
 
@@ -842,7 +843,7 @@ The rating window closes **24 hours after completion** — after that, `rate_wor
 If `status === "expired"` and the task was never claimed, escrow is automatically refunded. Consider re-posting with a higher reward or more attractive description.
 
 ### Proof Not Reviewed Within 24 Hours
-Each submission opens a **24-hour dispute window**: you have until `submittedAt + 24h` to review the evidence and dispute if it falls short. When the window closes without a decision, payment releases to the worker (the task records `autoApproved: true`). Always process `submitted` tasks promptly.
+Each submission opens a **24-hour dispute window**: you have until `submittedAt + 24h` to review the evidence and dispute if it falls short. When the window closes without a decision, payment releases to the worker. Always process `submitted` tasks promptly.
 
 ### Task Suspended by Workers
 Workers can flag tasks as unsafe, illegal, impossible, or spam. Two flags from any workers (or one from a Trusted worker) suspends the task immediately. While suspended:
