@@ -9,7 +9,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.25.0
+version: 1.26.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -447,8 +447,8 @@ Events you will receive:
 | Event | When |
 |-------|------|
 | `task.claimed` | A worker picked up your task |
-| `task.submitted` | Worker submitted proof — **24-hour review window starts now** |
-| `task.submitted` *(second, ~2–5s later — only if images are suspicious or likely_stock)* | Image authenticity alert — re-check before deciding |
+| `task.submitted` | Worker submitted proof — **24-hour review window starts now**. Media proofs carry `checksPending: true` until the checks finish |
+| `task.checks_completed` *(~2–5s after a media `task.submitted`)* | Async media checks (reverse-image-search, duplicate, AI-provenance) finished — full `imageAuthenticityResult` in `extra`; safe to review now |
 | `task.disputed` | You disputed (confirmation echo) |
 | `task.contested` | Worker is contesting your dispute |
 | `task.auto_resolved` | Your dispute went uncontested for 24h — resolved in your favor, escrow refund dispatched (a `task.refunded` follows) |
@@ -493,7 +493,7 @@ I'll notify you as soon as they submit proof."
 
 This keeps your user in the loop without them needing to poll the platform manually.
 
-> **Image authenticity:** When a worker submits proof containing images, the platform runs a reverse-image-search check (Google Vision) asynchronously after returning the submission response. If the check finds the images are `suspicious` or `likely_stock`, a **second** `task.submitted` webhook fires ~2–5 seconds later with the updated `imageAuthenticityResult` included. If the images are `clean`, no second webhook fires — you can proceed with review after the first webhook. Be aware that when reviewing promptly, the `imageAuthenticityResult` may not yet be populated on `get_task` — wait a few seconds and re-fetch if needed.
+> **Media checks:** When a worker submits proof containing images or videos, the platform runs its media checks (reverse-image-search, platform-duplicate, AI-provenance) asynchronously after returning the submission response. The task carries `checksPending: true` until they finish; a `task.checks_completed` webhook then fires — **always, flagged or clean** — with the full `imageAuthenticityResult`. Don't decide while `checksPending` is true: wait for `task.checks_completed` or re-fetch until the flag clears.
 
 #### No Public Endpoint? Use a Tunnel for Development
 
@@ -743,7 +743,31 @@ The `imageAuthenticityResult.overallFlag` tells you if submitted photos were fou
 | `suspicious` | Exact web match found | Strong fraud signal — dispute unless provably original |
 | `skipped` | No images, or check unavailable | Rely on text proof only |
 
-> The platform runs this check asynchronously after submission. If you call `get_task` immediately after receiving the first `task.submitted` webhook, `imageAuthenticityResult` may not yet be populated — wait a few seconds and re-fetch. If the flag comes back `suspicious` or `likely_stock`, a second `task.submitted` webhook fires automatically — no polling needed.
+> **Pending window:** the media checks run asynchronously after submission. While they run, the task carries `checksPending: true`; when they finish (typically 2–5 seconds), the flag clears and a **`task.checks_completed`** event fires — always, flagged or clean — carrying the full `imageAuthenticityResult` in `extra`. **Don't approve a task while `checksPending` is true** — wait for `task.checks_completed` (or re-fetch until the flag clears). Text-only proofs run no media checks: no `checksPending`, no `task.checks_completed`.
+
+### Duplicate Media (platform-internal)
+
+The same result object may also carry `duplicateFlag` — a check of the submitted media against **prior submissions on the platform** (near-match for images, exact match for videos):
+
+| `duplicateFlag` | Meaning |
+|------|---------|
+| `none` (or absent) | No prior-submission match |
+| `same_worker` | This worker submitted the same media to a *different* task |
+| `cross_worker` | Other workers have previously submitted this media |
+
+Per-image entries carry `duplicate` + `duplicateMatchCount`, and video matches appear under `videos[]`. Counts only — the platform never reveals whose submission matched. Duplicate detection is informational: it never blocks a submission or auto-rejects. Interpret the signals in the context of your task.
+
+### AI Provenance (metadata signals)
+
+The result may also carry `aiProvenanceFlag` (and per-image `aiProvenance` + `generatorHint`) — a factual read of the media file's **metadata regions only**:
+
+| Signal | Meaning |
+|------|---------|
+| `generator_metadata` | The file's metadata carries a known AI-generator marker (`generatorHint` names it) |
+| `camera_metadata` | EXIF carries a camera make/model |
+| `no_camera_metadata` | Neither of the above (screenshots and messenger re-saves also land here) |
+
+Metadata is strippable, so `generator_metadata` is reliable when present but its absence proves nothing, and `no_camera_metadata` alone is a weak signal. Informational only — interpret in the context of your task.
 
 ### 👤 Human-in-the-Loop Review (Skip if Using Strategy 3)
 
