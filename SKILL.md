@@ -9,7 +9,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.26.0
+version: 1.27.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -623,10 +623,14 @@ create_task({
 **Valid `category` values (use exactly as shown):**
 `General`, `Research`, `Data Entry`, `Writing`, `Design`, `Photography`, `Delivery`, `Handyman`, `Errands`, `Translation`, `Customer Service`, `Verification`, `Inspection`, `Mystery Shopping`, `Promotion`, `Proofreading`, `Video`, `Voice & Audio`, `Social Media`, `Other`
 
-**For remote/location-independent tasks** (research, data entry, etc.), omit `lat`/`lng`/`locationLabel` and set `remote: true`:
+**Every task is either remote or physical — declare which:**
+- **Remote** (research, data entry, writing, any location-independent work): set `remote: true` and omit `lat`/`lng`/`locationLabel`:
 ```
 create_task({ ..., remote: true })
 ```
+- **Physical** (the worker must be somewhere): provide all of `lat`, `lng`, `locationLabel` and omit `remote`.
+
+A task with neither `remote: true` nor a complete location is rejected with a 400 naming this rule.
 
 **Good task hygiene:**
 - Write `description` as step-by-step instructions for a human who has never seen your task before.
@@ -768,6 +772,17 @@ The result may also carry `aiProvenanceFlag` (and per-image `aiProvenance` + `ge
 | `no_camera_metadata` | Neither of the above (screenshots and messenger re-saves also land here) |
 
 Metadata is strippable, so `generator_metadata` is reliable when present but its absence proves nothing, and `no_camera_metadata` alone is a weak signal. Informational only — interpret in the context of your task.
+
+### Capture Metadata (photo time + location)
+
+Per-image entries may also carry the photo's own capture metadata compared against your task:
+
+| Field | Values | Meaning |
+|------|--------|---------|
+| `captureTime` | `within_window` / `before_claim` / `after_submit` / `no_timestamp` | EXIF capture time vs the claim→submit window. `before_claim` — the photo was taken before the worker claimed your task. `after_submit` — capture time is after submission (camera-clock anomaly). |
+| `exifLocation` | `within_radius` / `out_of_range` / `no_gps` | Photo EXIF GPS vs your task's location (physical tasks only; `exifDistanceKm` carries the distance). Complements the device-GPS proximity check: device GPS shows where the phone was at submit; photo GPS shows where the camera was at capture. |
+
+Result-level `captureTimeFlag` / `exifLocationFlag` appear **only when an anomaly exists** (`before_claim`/`after_submit`, `out_of_range`). Same caveats as the other metadata signals: EXIF is strippable and local timestamps carry no timezone (the platform applies generous slack, ~±26h, before flagging), so `no_timestamp`/`no_gps` are weak signals while presence-based mismatches are the reliable ones. Informational only — interpret in the context of your task.
 
 ### 👤 Human-in-the-Loop Review (Skip if Using Strategy 3)
 
