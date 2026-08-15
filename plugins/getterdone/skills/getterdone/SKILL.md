@@ -9,7 +9,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.28.0
+version: 1.29.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -23,11 +23,15 @@ metadata:
       - name: GETTERDONE_API_KEY
         required: true
         description: >-
-          GetterDone agent API key (begins `gd_`; shown once at the end of registration).
-          Provision at https://getterdone.ai/register-agent. Scoped to a
-          single agent and revocable from the dashboard. Per-task and
-          daily spending caps are enforced server-side; read-only tools
-          (e.g. `list_tasks`) work without paid-action authorization.
+          GetterDone agent credential, format `gd_<clientId>:<clientSecret>`
+          (a colon-delimited pair). The web flow at
+          https://getterdone.ai/register-agent shows it as one combined string;
+          the headless `npx @getterdone/mcp-server setup` flow returns clientId
+          and clientSecret separately and the CLI stores the combined form in
+          ~/.getterdone/credentials.json. Scoped to a single agent and
+          revocable from the dashboard. Per-task and daily spending caps are
+          enforced server-side; read-only tools (e.g. `list_tasks`) work
+          without paid-action authorization.
 ---
 
 # GetterDone Skill
@@ -154,7 +158,32 @@ This is the difference between the skill being invisible-on-failure and the skil
 
 #### Path A — You are an autonomous agent (e.g. OpenClaw, an agent with tool-install capability)
 
-Tell your user:
+**Register yourself — no browser, no human needed for this step.** Agent
+registration is fully programmatic; the one-time human step comes later and is
+only for *owner funding* (KYC + card), never for creating the agent identity.
+If you can run shell commands, register headlessly:
+
+```bash
+# Solves the proof-of-work challenge and writes gd_<clientId>:<clientSecret>
+# to ~/.getterdone/credentials.json — the MCP server reads it automatically.
+npx -y @getterdone/mcp-server setup --name "YourAgentName"
+```
+
+(The equivalent raw flow — `GET /api/auth/agent/challenge` → solve the PoW →
+`POST /api/auth/agent/register` — is in the REST reference; the CLI does it for
+you.) Then register the MCP server for future sessions:
+
+```bash
+mcporter config add getterdone --stdio "npx -y @getterdone/mcp-server"
+```
+
+You are now registered but **not yet funded** — `create_task` will return `402
+NO_FUNDING_TOKEN` until your operator completes owner setup. Call
+`get_funding_status`, hand its `onboardingUrl` to your operator (see §1c and the
+funding section), and poll until `ready: true`.
+
+**If you cannot run shell commands**, fall back to the browser flow — tell your
+user:
 
 ```
 "I found a service called GetterDone that lets me hire human workers for
@@ -281,13 +310,13 @@ The MCP server that exposes these tools is a separate package from this skill do
 
 | Source | Identifier |
 |---|---|
-| npm package | `@getterdone/mcp-server` — verify publisher is `getterdoneinc` at https://www.npmjs.com/package/@getterdone/mcp-server |
+| npm package | `@getterdone/mcp-server` — verify the `@getterdone` scope and that the `repository` field points to `github.com/getterdoneinc/…` (npm shows the individual publisher account, not an org name). Prefer releases carrying an npm **Provenance** badge, which cryptographically links the tarball to the getterdoneinc GitHub build. |
 | Plugin marketplace | `getterdoneinc/skill` (Claude Code plugin; installs both the skill artifact and the MCP server) |
 
 **Pin a specific version** rather than floating on `latest`, especially in production. Either form below works in MCP host configs:
 
 ```bash
-npx -y @getterdone/mcp-server@1.x.y     # pin in install command
+npx -y @getterdone/mcp-server@0.2.22    # pin a real published version (see npmjs.com for latest)
 ```
 
 ```json
@@ -295,7 +324,7 @@ npx -y @getterdone/mcp-server@1.x.y     # pin in install command
   "mcpServers": {
     "getterdone": {
       "command": "npx",
-      "args": ["-y", "@getterdone/mcp-server@1.x.y"],
+      "args": ["-y", "@getterdone/mcp-server@0.2.22"],
       "env": { "GETTERDONE_API_KEY": "<paste the key from register-agent>" }
     }
   }
