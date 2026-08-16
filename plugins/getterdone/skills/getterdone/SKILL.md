@@ -9,7 +9,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.29.0
+version: 1.31.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -118,7 +118,7 @@ The tool automatically loads credentials from one of these sources (in priority 
 | `~/.getterdone/credentials.json` | Written by a previous CLI setup (`npx @getterdone/mcp-server setup`) |
 
 Call `get_funding_status` — one call answers both readiness questions (there is no balance to check; tasks are funded by a card authorization at creation):
-- **`{ ready: true }`** → credentials valid AND the Agent Owner setup is complete. Go to §2.
+- **`{ ready: true }`** → credentials valid AND the Agent Owner setup is complete. Go to §2. When ready, the response also carries `recurring` and `perTaskLimitUsd` (see the recurring-token note below).
 - **`{ ready: false, onboardingUrl }`** → credentials valid, but the Agent Owner hasn't finished setup (KYC + card + funding token). Paid task creation would fail with `402 NO_FUNDING_TOKEN` — surface `onboardingUrl` to the user (see 1c).
 - **Auth error (401), or `[not_configured]` from a recent mcp-server** → credentials are missing or invalid. Proceed to **Step 2**.
 - **Tool not found** → fall back to `get_balance` as a plain credentials ping (any success = credentials valid; it cannot tell you about funding). Proceed per its result.
@@ -370,6 +370,8 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
                                   │
                                   ├── (uncontested for 24h) ────► [resolved]
                                   │        (auto-resolved in your favor; escrow refunded)
+                                  ├── (worker forfeits/accepts) ► [resolved]
+                                  │        (worker concedes; escrow refunded — task.forfeited)
                                   │ (worker contests within 24h)
                                   ▼
                             [contested]  ← admin arbitration
@@ -382,7 +384,7 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
 |-------|---------|----------------|
 | `payout_pending` | Approval committed; Stripe payout transfer initiating. If `approve_task` returns `402`, retry the same call — it is idempotent. | Held until payout succeeds |
 | `completed` | Payout confirmed; worker paid | Released to worker |
-| `resolved` | Dispute resolved in your favor — admin decision, or auto-resolved after the worker's 24h contest window lapsed | Returned to agent |
+| `resolved` | Dispute resolved in your favor — admin decision, auto-resolved after the worker's 24h contest window lapsed, or the worker proactively accepted/forfeited it (`task.forfeited`) | Returned to agent |
 | `expired` | Deadline passed with no claim or submission | Returned to agent |
 | `cancelled` | Agent cancelled an unclaimed `open` task | Returned to agent |
 
@@ -673,6 +675,8 @@ A task with neither `remote: true` nor a complete location is rejected with a 40
 **Funding is automatic.** `create_task` secures the Agent Owner's card for `reward + fee` at creation, drawing against your active funding token. Tasks with deadlines ≤ 6 days place a card **authorization** (captured when the worker submits proof); longer-deadline tasks are charged immediately and require **Established or Business owner standing** — an Emerging account gets `403` with code `LONG_DEADLINE_REQUIRES_VERIFICATION` (retry with `expiresInHours` ≤ 144; Established standing is earned automatically once the owner account builds platform track record, so there is no action to take beyond normal use). Expired, cancelled, or dispute-won tasks release/refund the full amount back to the card (a `task.refunded` webhook fires) — for authorized-not-yet-captured tasks the hold simply releases, with nothing ever collected.
 
 > **Prerequisite:** A one-time Agent Owner setup at **https://getterdone.ai/agent-owner** (Stripe Identity verification + card vault + funding token) is still required before `create_task` can charge. Check ahead of time with `get_funding_status` — `ready: false` returns an `onboardingUrl` pre-filled for this agent; if you skip the check and `create_task` returns `402 NO_FUNDING_TOKEN`, direct your developer to the same URL.
+>
+> **Single-use vs recurring tokens — how to post more than one task.** A funding token is **single-use by default**: it funds exactly one task and is then consumed, so a second `create_task` returns `402 NO_FUNDING_TOKEN` until the owner issues a new token. To post repeatedly without a human step each time, the owner enables **Recurring** when issuing the token (it stays active across tasks). After `ready: true`, `get_funding_status` reports which you have: `recurring: false` (expect to hand the owner the `onboardingUrl` again after each task) or `recurring: true` (post freely, up to `perTaskLimitUsd` per task). If your agent is meant to work autonomously across many tasks, tell your operator to check **Recurring** during setup.
 >
 > **`fund_account` is deprecated and a no-op** — funding now happens at task creation. The tool no longer charges the card or credits any balance (calling it does nothing); just call `create_task`. `get_balance` remains useful to view `pendingEscrow` (escrow held across your active tasks):
 > ```
