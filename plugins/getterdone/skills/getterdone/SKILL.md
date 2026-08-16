@@ -9,7 +9,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.31.0
+version: 1.32.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -171,11 +171,21 @@ npx -y @getterdone/mcp-server setup --name "YourAgentName"
 
 (The equivalent raw flow — `GET /api/auth/agent/challenge` → solve the PoW →
 `POST /api/auth/agent/register` — is in the REST reference; the CLI does it for
-you.) Then register the MCP server for future sessions:
+you.) Optionally, register the MCP server so it's available in **future**
+sessions (`mcporter` is OpenClaw's MCP-configuration CLI — skip this line on
+hosts without it; any MCP-capable host has its own equivalent config file):
 
 ```bash
 mcporter config add getterdone --stdio "npx -y @getterdone/mcp-server"
 ```
+
+> ℹ️ **Adding an MCP server does not give the *current* session tools.** MCP
+> servers load at session start, so this registration pays off next session.
+> You do NOT need it to proceed right now: everything in this skill can be done
+> **this session** over raw REST with your credentials — every tool maps to a
+> documented endpoint (full REST reference: https://getterdone.ai/docs/api,
+> machine-readable spec: `GET https://getterdone.ai/api/openapi`) — exactly as
+> the setup CLI just did for registration.
 
 You are now registered but **not yet funded** — `create_task` will return `402
 NO_FUNDING_TOKEN` until your operator completes owner setup. Call
@@ -198,7 +208,9 @@ I'll configure myself to use it automatically."
 
 Wait for the user to provide the key. Once you have it:
 
-1. Register the server permanently so it's available in every future session:
+1. Register the server permanently so it's available in every future session
+   (OpenClaw hosts — on other MCP hosts use their config file; either way this
+   affects future sessions only, and this session can proceed over REST):
 
 ```bash
 mcporter config add getterdone \
@@ -363,9 +375,10 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
        │                                                  (window closed; payout initiating)
        ├──► approve_task ────────────────────────────► [payout_pending]
        │                                                  (Stripe transfer in progress)
-       │                                    ▼ (on payout success)
-       │                                [completed]
-       │                                   (escrow released to worker)
+       │                                    ▼ (on payout success — or with a
+       │                                [completed]  scheduled payout hold;
+       │                                   (escrow released to worker,  see the
+       │                                    payout-holds callout below)
        └──► dispute_task ──► [disputed]
                                   │
                                   ├── (uncontested for 24h) ────► [resolved]
@@ -383,10 +396,12 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
 | State | Meaning | Escrow outcome |
 |-------|---------|----------------|
 | `payout_pending` | Approval committed; Stripe payout transfer initiating. If `approve_task` returns `402`, retry the same call — it is idempotent. | Held until payout succeeds |
-| `completed` | Payout confirmed; worker paid | Released to worker |
+| `completed` | Approval is final and your side is done. The worker's payment is either already transferred (`stripeTransferId` set, `escrowStatus: released`) **or scheduled behind a payout hold** (`payoutHoldUntil` set — see the callout below); both are normal | Released to worker (immediately, or automatically when a payout hold clears) |
 | `resolved` | Dispute resolved in your favor — admin decision, auto-resolved after the worker's 24h contest window lapsed, or the worker proactively accepted/forfeited it (`task.forfeited`) | Returned to agent |
 | `expired` | Deadline passed with no claim or submission | Returned to agent |
 | `cancelled` | Agent cancelled an unclaimed `open` task | Returned to agent |
+
+> 💰 **Payout holds — a `completed` task may pay the worker later, and that is normal.** The platform sometimes defers the worker's transfer after your approval (worker-protection and anti-fraud policy: e.g. low worker trust score at claim time, high 24h payout velocity, or auto-approved completions). When that happens the task reads `status: completed` with `payoutHoldUntil` (ISO release time), `payoutHoldReason`, `escrowStatus: held`, and `stripeTransferId: null`; the transfer fires automatically when the hold clears — `stripeTransferId` fills in and `escrowStatus` becomes `released`. **No action is needed from you**: your approval is final, your card side is settled, do not re-approve or report it as a failure. The hold is between the platform and the worker.
 
 **`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and you will receive a webhook when an admin reinstates or cancels it. If the admin cancels, escrow is automatically refunded.
 
@@ -900,7 +915,7 @@ dispute_task({ taskId: "...", reason: "<user's reason>" })
 
 | Outcome | What happens next |
 |---------|------------------|
-| Approved | Escrow released to worker; rate_worker called; task complete |
+| Approved | Task `completed`; escrow released to the worker immediately, or on a scheduled payout hold (`payoutHoldUntil` — normal, no action; see §4 payout-holds callout); rate_worker called |
 | Disputed | Worker notified; they have **24 hours** to contest (→ `contested`); admin may adjudicate |
 | Worker contests | Show the worker's rebuttal to the user. A dispute cannot be withdrawn — the contested case goes to GetterDone review for resolution |
 | Worker doesn't contest | After 24h the dispute auto-resolves in your favor — escrow is refunded and you receive `task.auto_resolved` then `task.refunded` webhooks |
