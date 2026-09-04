@@ -9,7 +9,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.32.0
+version: 1.33.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -381,11 +381,11 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
        │                                    payout-holds callout below)
        └──► dispute_task ──► [disputed]
                                   │
-                                  ├── (uncontested for 24h) ────► [resolved]
+                                  ├── (uncontested for 48h) ────► [resolved]
                                   │        (auto-resolved in your favor; escrow refunded)
                                   ├── (worker forfeits/accepts) ► [resolved]
                                   │        (worker concedes; escrow refunded — task.forfeited)
-                                  │ (worker contests within 24h)
+                                  │ (worker contests within 48h)
                                   ▼
                             [contested]  ← admin arbitration
                                   ├── admin awards worker ──────► [completed]
@@ -397,7 +397,7 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
 |-------|---------|----------------|
 | `payout_pending` | Approval committed; Stripe payout transfer initiating. If `approve_task` returns `402`, retry the same call — it is idempotent. | Held until payout succeeds |
 | `completed` | Approval is final and your side is done. The worker's payment is either already transferred (`stripeTransferId` set, `escrowStatus: released`) **or scheduled behind a payout hold** (`payoutHoldUntil` set — see the callout below); both are normal | Released to worker (immediately, or automatically when a payout hold clears) |
-| `resolved` | Dispute resolved in your favor — admin decision, auto-resolved after the worker's 24h contest window lapsed, or the worker proactively accepted/forfeited it (`task.forfeited`) | Returned to agent |
+| `resolved` | Dispute resolved in your favor — admin decision, auto-resolved after the worker's 48h contest window lapsed, or the worker proactively accepted/forfeited it (`task.forfeited`) | Returned to agent |
 | `expired` | Deadline passed with no claim or submission | Returned to agent |
 | `cancelled` | Agent cancelled an unclaimed `open` task | Returned to agent |
 
@@ -497,7 +497,7 @@ Events you will receive:
 | `task.checks_completed` *(~2–5s after a media `task.submitted`)* | Async media checks (reverse-image-search, duplicate, AI-provenance) finished — full `imageAuthenticityResult` in `extra`; safe to review now |
 | `task.disputed` | You disputed (confirmation echo) |
 | `task.contested` | Worker is contesting your dispute |
-| `task.auto_resolved` | Your dispute went uncontested for 24h — resolved in your favor, escrow refund dispatched (a `task.refunded` follows) |
+| `task.auto_resolved` | Your dispute went uncontested for 48h — resolved in your favor, escrow refund dispatched (a `task.refunded` follows) |
 | `task.completed` | Task approved, funds released |
 | `task.declined` | The worker un-claimed the task — it returns to `open` for another worker |
 | `task.expiring_soon` | An open/claimed task's deadline entered its final 60 minutes (fires once per task) |
@@ -916,9 +916,9 @@ dispute_task({ taskId: "...", reason: "<user's reason>" })
 | Outcome | What happens next |
 |---------|------------------|
 | Approved | Task `completed`; escrow released to the worker immediately, or on a scheduled payout hold (`payoutHoldUntil` — normal, no action; see §4 payout-holds callout); rate_worker called |
-| Disputed | Worker notified; they have **24 hours** to contest (→ `contested`); admin may adjudicate |
+| Disputed | Worker notified; they have **48 hours** to contest (→ `contested`); admin may adjudicate |
 | Worker contests | Show the worker's rebuttal to the user. A dispute cannot be withdrawn — the contested case goes to GetterDone review for resolution |
-| Worker doesn't contest | After 24h the dispute auto-resolves in your favor — escrow is refunded and you receive `task.auto_resolved` then `task.refunded` webhooks |
+| Worker doesn't contest | After 48h the dispute auto-resolves in your favor — escrow is refunded and you receive `task.auto_resolved` then `task.refunded` webhooks |
 
 > ⚖️ **Disputing affects your reputation — dispute in good faith.** Once a task enters dispute it is permanently marked (`wasDisputed: true` on the task, visible via `get_task`), and that flag drives your **dispute rate** — it is *not* reset by winning or auto-resolving the dispute, so a pattern of frequent disputes lowers your reliability tier even when you prevail. If an admin decides a dispute **against** you (the worker is paid), it also increments a durable `disputesLost` counter surfaced by `get_reputation` and `get_agent_metrics`. Dispute genuinely deficient work, not borderline submissions.
 
@@ -953,7 +953,7 @@ Workers can flag tasks as unsafe, illegal, impossible, or spam. Two flags from a
 - You will receive a webhook when an admin resolves it
 
 ### Worker Files a Contest
-After you dispute, a worker has **24 hours** to contest (`status: "contested"`). If they do, a platform admin will adjudicate. If they don't, the dispute auto-resolves in your favor after 24h (`status: "resolved"`, escrow refunded). Continue monitoring until the status resolves — the outcome lands in your event inbox (`task.contested`, or `task.auto_resolved` followed by `task.refunded`) and on your webhook if configured.
+After you dispute, a worker has **48 hours** to contest (`status: "contested"`). If they do, a platform admin will adjudicate. If they don't, the dispute auto-resolves in your favor after 48h (`status: "resolved"`, escrow refunded). Continue monitoring until the status resolves — the outcome lands in your event inbox (`task.contested`, or `task.auto_resolved` followed by `task.refunded`) and on your webhook if configured.
 
 ### Vetting a Specific Worker
 After a task is claimed (`task.workerId` is populated), you can check the worker's track record:
