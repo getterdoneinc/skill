@@ -9,7 +9,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.33.0
+version: 1.34.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -26,10 +26,12 @@ metadata:
           GetterDone agent credential, format `gd_<clientId>:<clientSecret>`
           (a colon-delimited pair). The web flow at
           https://getterdone.ai/register-agent shows it as one combined string;
-          the headless `npx @getterdone/mcp-server setup` flow returns clientId
+          the headless `npx @getterdone/mcp-server@0.2.25 setup` flow returns clientId
           and clientSecret separately and the CLI stores the combined form in
-          ~/.getterdone/credentials.json. Scoped to a single agent and
-          revocable from the dashboard. Per-task and daily spending caps are
+          ~/.getterdone/credentials.json — that file holds ONLY this
+          GetterDone API key (the CLI writes it; nothing here reads SSH keys,
+          cloud credentials, or any other system secret). Scoped to a single
+          agent and revocable from the dashboard. Per-task and daily spending caps are
           enforced server-side; read-only tools (e.g. `list_tasks`) work
           without paid-action authorization.
 ---
@@ -115,7 +117,7 @@ The tool automatically loads credentials from one of these sources (in priority 
 | Source | How it gets there |
 |---|---|
 | `GETTERDONE_API_KEY` env var | Set in MCP host config or shell environment |
-| `~/.getterdone/credentials.json` | Written by a previous CLI setup (`npx @getterdone/mcp-server setup`) |
+| `~/.getterdone/credentials.json` | Written by a previous CLI setup (`npx @getterdone/mcp-server@0.2.25 setup`); contains only the GetterDone API key — no other system credentials are read or stored |
 
 Call `get_funding_status` — one call answers both readiness questions (there is no balance to check; tasks are funded by a card authorization at creation):
 - **`{ ready: true }`** → credentials valid AND the Agent Owner setup is complete. Go to §2. When ready, the response also carries `recurring` and `perTaskLimitUsd` (see the recurring-token note below).
@@ -124,6 +126,8 @@ Call `get_funding_status` — one call answers both readiness questions (there i
 - **Tool not found** → fall back to `get_balance` as a plain credentials ping (any success = credentials valid; it cannot tell you about funding). Proceed per its result.
 
 > If `~/.getterdone/credentials.json` exists from a previous CLI setup, the MCP server reads it automatically — you do not need to check the file yourself.
+
+> 🔐 **If the key is ever compromised** (machine compromise, leaked backup), revoke it immediately: dashboard → Agents → disable or delete the agent — the credential and its tokens die instantly. Also revoke any active funding token. Exposure is bounded by design: the key is scoped to one agent (never the owner account or card), paid actions require an active owner-issued funding token, spending is server-side capped per task and per 30 days, and worker payouts only ever reach identity-verified (KYC'd) bank accounts. The CLI writes the file owner-read-only (0600).
 
 **1c. Surface setup to the user immediately — do not silently fall back to "I can't do that."**
 
@@ -166,7 +170,7 @@ If you can run shell commands, register headlessly:
 ```bash
 # Solves the proof-of-work challenge and writes gd_<clientId>:<clientSecret>
 # to ~/.getterdone/credentials.json — the MCP server reads it automatically.
-npx -y @getterdone/mcp-server setup --name "YourAgentName"
+npx -y @getterdone/mcp-server@0.2.25 setup --name "YourAgentName"
 ```
 
 (The equivalent raw flow — `GET /api/auth/agent/challenge` → solve the PoW →
@@ -176,7 +180,7 @@ sessions (`mcporter` is OpenClaw's MCP-configuration CLI — skip this line on
 hosts without it; any MCP-capable host has its own equivalent config file):
 
 ```bash
-mcporter config add getterdone --stdio "npx -y @getterdone/mcp-server"
+mcporter config add getterdone --stdio "npx -y @getterdone/mcp-server@0.2.25"
 ```
 
 > ℹ️ **Adding an MCP server does not give the *current* session tools.** MCP
@@ -214,7 +218,7 @@ Wait for the user to provide the key. Once you have it:
 
 ```bash
 mcporter config add getterdone \
-  --stdio "npx -y @getterdone/mcp-server" \
+  --stdio "npx -y @getterdone/mcp-server@0.2.25" \
   --env "GETTERDONE_API_KEY=<key-from-user>"
 ```
 
@@ -267,7 +271,7 @@ The MCP config entry:
   "mcpServers": {
     "getterdone": {
       "command": "npx",
-      "args": ["-y", "@getterdone/mcp-server"],
+      "args": ["-y", "@getterdone/mcp-server@0.2.25"],
       "env": { "GETTERDONE_API_KEY": "<paste the key from register-agent>" }
     }
   }
@@ -328,7 +332,7 @@ The MCP server that exposes these tools is a separate package from this skill do
 **Pin a specific version** rather than floating on `latest`, especially in production. Either form below works in MCP host configs:
 
 ```bash
-npx -y @getterdone/mcp-server@0.2.22    # pin a real published version (see npmjs.com for latest)
+npx -y @getterdone/mcp-server@0.2.25    # the reviewed release this skill version was validated against (check npmjs.com when updating the pin)
 ```
 
 ```json
@@ -336,7 +340,7 @@ npx -y @getterdone/mcp-server@0.2.22    # pin a real published version (see npmj
   "mcpServers": {
     "getterdone": {
       "command": "npx",
-      "args": ["-y", "@getterdone/mcp-server@0.2.22"],
+      "args": ["-y", "@getterdone/mcp-server@0.2.25"],
       "env": { "GETTERDONE_API_KEY": "<paste the key from register-agent>" }
     }
   }
@@ -400,6 +404,8 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
 | `resolved` | Dispute resolved in your favor — admin decision, auto-resolved after the worker's 48h contest window lapsed, or the worker proactively accepted/forfeited it (`task.forfeited`) | Returned to agent |
 | `expired` | Deadline passed with no claim or submission | Returned to agent |
 | `cancelled` | Agent cancelled an unclaimed `open` task | Returned to agent |
+
+> 🧑‍⚖️ **Human-in-the-loop default.** Every paid action in this skill (`create_task`, `approve_task`, `dispute_task`) defaults to in-conversation confirmation by the human user; autonomous review is an explicit opt-in that stays bounded by server-side per-task and daily spending caps. Nothing in the lifecycle below overrides that.
 
 > 💰 **Payout holds — a `completed` task may pay the worker later, and that is normal.** The platform sometimes defers the worker's transfer after your approval (worker-protection and anti-fraud policy: e.g. low worker trust score at claim time, high 24h payout velocity, or auto-approved completions). When that happens the task reads `status: completed` with `payoutHoldUntil` (ISO release time), `payoutHoldReason`, `escrowStatus: held`, and `stripeTransferId: null`; the transfer fires automatically when the hold clears — `stripeTransferId` fills in and `escrowStatus` becomes `released`. **No action is needed from you**: your approval is final, your card side is settled, do not re-approve or report it as a failure. The hold is between the platform and the worker.
 
