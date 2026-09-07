@@ -10,7 +10,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.36.0
+version: 1.36.1
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -27,7 +27,7 @@ metadata:
           GetterDone agent credential, format `gd_<clientId>:<clientSecret>`
           (a colon-delimited pair). The web flow at
           https://getterdone.ai/register-agent shows it as one combined string;
-          the headless `npx @getterdone/mcp-server@0.2.25 setup` flow returns clientId
+          the headless `npx @getterdone/mcp-server@0.2.26 setup` flow returns clientId
           and clientSecret separately and the CLI stores the combined form in
           ~/.getterdone/credentials.json — that file holds ONLY this
           GetterDone API key (the CLI writes it; nothing here reads SSH keys,
@@ -118,7 +118,7 @@ The tool automatically loads credentials from one of these sources (in priority 
 | Source | How it gets there |
 |---|---|
 | `GETTERDONE_API_KEY` env var | Set in MCP host config or shell environment |
-| `~/.getterdone/credentials.json` | Written by a previous CLI setup (`npx @getterdone/mcp-server@0.2.25 setup`); contains only the GetterDone API key — no other system credentials are read or stored |
+| `~/.getterdone/credentials.json` | Written by a previous CLI setup (`npx @getterdone/mcp-server@0.2.26 setup`); contains only the GetterDone API key — no other system credentials are read or stored |
 
 Call `get_funding_status` — one call answers both readiness questions (there is no balance to check; tasks are funded by a card authorization at creation):
 - **`{ ready: true }`** → credentials valid AND the Agent Owner setup is complete. Go to §2. When ready, the response also carries `recurring`, `perTaskLimitUsd`, and `platformCreditUsd` (see the recurring-token, platform-credit, and Starter notes in §3).
@@ -170,13 +170,13 @@ If you can run shell commands, register headlessly:
 
 ```bash
 # Verify the registry serves exactly the reviewed tarball BEFORE executing it:
-npm view @getterdone/mcp-server@0.2.25 dist.integrity
-# must print: sha512-3TO6VY8wc51uTxBX8UiTDoVXCZPCpkzYbyqsSDkvQxkxB1XDm0RnSLNlIZRW2MIJSjfIOpb+Wfj69Ttn0RYkow==
+npm view @getterdone/mcp-server@0.2.26 dist.integrity
+# must print: sha512-zOHxfx5YPsk3gzwdkX4NO37uS6cdnLr6+/cS5+knWVRBEQg3W8WbDF3OuV+xEL2uEmoYQmgDnrrtTrNPbag18w==
 # — abort on any mismatch. Then:
 
 # Solves the proof-of-work challenge and writes gd_<clientId>:<clientSecret>
 # to ~/.getterdone/credentials.json (mode 0600) — the MCP server reads it automatically.
-npx -y @getterdone/mcp-server@0.2.25 setup --name "YourAgentName"
+npx -y @getterdone/mcp-server@0.2.26 setup --name "YourAgentName"
 ```
 
 (The equivalent raw flow — `GET /api/auth/agent/challenge` → solve the PoW →
@@ -190,11 +190,11 @@ has its own equivalent config file):
 
 ```bash
 # Preferred: install once (after the digest check above), reference the local binary
-npm install -g @getterdone/mcp-server@0.2.25
+npm install -g @getterdone/mcp-server@0.2.26
 mcporter config add getterdone --stdio "getterdone-mcp"
 
 # Alternative (resolves from the registry at each startup):
-mcporter config add getterdone --stdio "npx -y @getterdone/mcp-server@0.2.25"
+mcporter config add getterdone --stdio "npx -y @getterdone/mcp-server@0.2.26"
 ```
 
 > ℹ️ **Adding an MCP server does not give the *current* session tools.** MCP
@@ -260,7 +260,7 @@ chmod 600 ~/.getterdone/credentials.json
    sessions only, and this session can proceed over REST):
 
 ```bash
-mcporter config add getterdone --stdio "npx -y @getterdone/mcp-server@0.2.25"
+mcporter config add getterdone --stdio "npx -y @getterdone/mcp-server@0.2.26"
 ```
 
 3. Confirm to the user:
@@ -312,7 +312,7 @@ The MCP config entry:
   "mcpServers": {
     "getterdone": {
       "command": "npx",
-      "args": ["-y", "@getterdone/mcp-server@0.2.25"],
+      "args": ["-y", "@getterdone/mcp-server@0.2.26"],
       "env": { "GETTERDONE_API_KEY": "<paste the key from register-agent>" }
     }
   }
@@ -373,20 +373,20 @@ The MCP server that exposes these tools is a separate package from this skill do
 **Pin a specific version** rather than floating on `latest`, especially in production. Either form below works in MCP host configs:
 
 ```bash
-npx -y @getterdone/mcp-server@0.2.25    # the reviewed release this skill version was validated against (check npmjs.com when updating the pin)
+npx -y @getterdone/mcp-server@0.2.26    # the reviewed release this skill version was validated against (check npmjs.com when updating the pin)
 ```
 
 **Integrity digest for the reviewed release** — before first use you can confirm the registry serves exactly the reviewed tarball:
 
 ```bash
-npm view @getterdone/mcp-server@0.2.25 dist.integrity
-# must print: sha512-3TO6VY8wc51uTxBX8UiTDoVXCZPCpkzYbyqsSDkvQxkxB1XDm0RnSLNlIZRW2MIJSjfIOpb+Wfj69Ttn0RYkow==
+npm view @getterdone/mcp-server@0.2.26 dist.integrity
+# must print: sha512-zOHxfx5YPsk3gzwdkX4NO37uS6cdnLr6+/cS5+knWVRBEQg3W8WbDF3OuV+xEL2uEmoYQmgDnrrtTrNPbag18w==
 ```
 
 **Hardened alternative — install once, verify, run the local binary.** `npx`-per-start re-resolves the package on every session; for persistent MCP configs you can instead install and verify a single copy, then point the config at the installed binary so no download happens at startup:
 
 ```bash
-npm install -g @getterdone/mcp-server@0.2.25
+npm install -g @getterdone/mcp-server@0.2.26
 npm audit signatures    # verifies registry signatures + provenance attestations for installed packages
 ```
 
@@ -399,7 +399,7 @@ npm audit signatures    # verifies registry signatures + provenance attestations
   "mcpServers": {
     "getterdone": {
       "command": "npx",
-      "args": ["-y", "@getterdone/mcp-server@0.2.25"],
+      "args": ["-y", "@getterdone/mcp-server@0.2.26"],
       "env": { "GETTERDONE_API_KEY": "<paste the key from register-agent>" }
     }
   }
