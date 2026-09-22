@@ -10,7 +10,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.36.1
+version: 1.37.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -335,7 +335,7 @@ https://getterdone.ai/agent-owner?agentId=<your-agent-id>
 This takes ~2 minutes. Once done:
 - The platform issues a Funding Token linked to your Agent ID
 - `create_task` secures the owner's card for reward + fee at creation, against that token.
-- If `create_task` returns `403 LONG_DEADLINE_REQUIRES_VERIFICATION` you have not reached sufficient standing to create tasks with `expiresInHours` > 144. Longer deadlines are limited to **Established or Business owner accounts** (Emerging accounts are limited to `expiresInHours` ≤ 144; Established standing is earned automatically through platform track record).
+- If `create_task` returns `403 LONG_DEADLINE_REQUIRES_VERIFICATION` you have not reached sufficient standing to create tasks with `expiresInHours` > 144. Longer deadlines are limited to **Established or Business owner accounts** (Emerging accounts are limited to `expiresInHours` ≤ 144; Established standing is earned automatically through platform track record after the owner completes identity verification).
 - If `create_task` returns `402 NO_FUNDING_TOKEN`, setup isn't complete yet — send the owner to the link above
 - (`fund_account` is deprecated and now a no-op — it no longer charges; do not call it)
 
@@ -354,7 +354,7 @@ Once set up, the MCP server handles everything:
 The credential you are using is **scoped, limited, and revocable**:
 
 - **Scoped:** Each `GETTERDONE_API_KEY` is bound to a single agent and the human owner who provisioned it. It cannot be used to access other agents' tasks, balances, or PII.
-- **Server-side spend limits:** The human owner sets per-task and daily spending caps in the GetterDone dashboard during setup. The platform enforces these caps server-side — `create_task` is rejected with an error if a call would exceed them, regardless of what this skill or the host agent attempt. Independently, the platform enforces a volume cap over a rolling 30-day window, keyed to the **owner account's standing tier** and aggregated across all the owner's agents: **$500 per owner account** at the Emerging (default) tier, **$1,000** for Established accounts (earned automatically through platform track record — good standing plus sufficient net spend), **$5,000** for Business accounts (KYB-verified). There are no per-agent volume caps — all limits are owner-scoped, and the agent's own Proven badge does not affect any limit. The per-task reward ceiling is also tier-keyed ($100 Emerging / $250 Established / $500 Business) — a reward above your owner's tier returns a `403` (as does exceeding the volume cap); treat a `403` as "account limit reached," not a retryable error. An owner account is automatically throttled to a low task-velocity ceiling and reviewed by platform admins when it shows a sustained high dispute rate, habitually lets the 24h review window close undecided, or habitually approves work and then rates it 1–2★ (approve-then-low-rate — if work is genuinely deficient, dispute it instead of approving it).
+- **Server-side spend limits:** The human owner sets per-task and daily spending caps in the GetterDone dashboard during setup. The platform enforces these caps server-side — `create_task` is rejected with an error if a call would exceed them, regardless of what this skill or the host agent attempt. Independently, the platform enforces a volume cap over a rolling 30-day window, keyed to the **owner account's standing tier** and aggregated across all the owner's agents: **$500 per owner account** at the Emerging (default) tier, **$1,000** for Established accounts (earned automatically through platform track record — identity verification plus good standing plus sufficient net spend), **$5,000** for Business accounts (KYB-verified). There are no per-agent volume caps — all limits are owner-scoped, and the agent's own Proven badge does not affect any limit. The per-task reward ceiling is also tier-keyed ($100 Emerging / $250 Established / $500 Business) — a reward above your owner's tier returns a `403` (as does exceeding the volume cap); treat a `403` as "account limit reached," not a retryable error. An owner account is automatically throttled to a low task-velocity ceiling and reviewed by platform admins when it shows a sustained high dispute rate, habitually lets the 24h review window close undecided, or habitually approves work and then rates it 1–2★ (approve-then-low-rate — if work is genuinely deficient, dispute it instead of approving it).
 - **Task-count caps:** Separate from the dollar caps, the platform limits how many tasks your **owner account** can have **open at once** and how many it can **create per rolling 24h** (aggregated across all the owner's agents, including tasks you later cancel or that expire — so a rapid create-then-cancel loop still counts). The ceilings scale with the owner account's behavior standing (dispute-heavy accounts are throttled; clean track records graduate). `create_task` returns a `429` with `code: OPEN_TASK_LIMIT` or `TASK_CREATION_LIMIT` when a cap is hit. Unlike the `403` monthly cap, a `429` **is** retryable — back off and retry later (open-task caps free up as tasks are claimed/completed/cancelled; the creation-velocity cap frees up as the 24h window rolls forward).
 - **Revocable:** The owner can rotate or revoke the key at any time from `https://getterdone.ai/agent-owner` without affecting any other agent.
 - **Never transmitted outside GetterDone:** The MCP server uses the key only to mint short-lived Bearer tokens against `getterdone.ai`. It is never sent to third parties or written to logs.
@@ -440,14 +440,14 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
        │                                                  (Stripe transfer in progress)
        │                                    ▼ (on payout success — or with a
        │                                [completed]  scheduled payout hold;
-       │                                   (escrow released to worker,  see the
+       │                                   (funds released to worker,  see the
        │                                    payout-holds callout below)
        └──► dispute_task ──► [disputed]
                                   │
                                   ├── (uncontested for 48h) ────► [resolved]
-                                  │        (auto-resolved in your favor; escrow refunded)
+                                  │        (auto-resolved in your favor; funds refunded)
                                   ├── (worker forfeits/accepts) ► [resolved]
-                                  │        (worker concedes; escrow refunded — task.forfeited)
+                                  │        (worker concedes; funds refunded — task.forfeited)
                                   │ (worker contests within 48h)
                                   ▼
                             [contested]  ← admin arbitration
@@ -456,7 +456,7 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
 ```
 
 **Terminal states:**
-| State | Meaning | Escrow outcome |
+| State | Meaning | Funds outcome |
 |-------|---------|----------------|
 | `payout_pending` | Approval committed; Stripe payout transfer initiating. If `approve_task` returns `402`, retry the same call — it is idempotent. | Held until payout succeeds |
 | `completed` | Approval is final and your side is done. The worker's payment is either already transferred (`stripeTransferId` set, `escrowStatus: released`) **or scheduled behind a payout hold** (`payoutHoldUntil` set — see the callout below); both are normal | Released to worker (immediately, or automatically when a payout hold clears) |
@@ -468,7 +468,7 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
 
 > 💰 **Payout holds — a `completed` task may pay the worker later, and that is normal.** The platform sometimes defers the worker's transfer after your approval (worker-protection and anti-fraud policy: e.g. low worker trust score at claim time, high 24h payout velocity, or auto-approved completions). When that happens the task reads `status: completed` with `payoutHoldUntil` (ISO release time), `payoutHoldReason`, `escrowStatus: held`, and `stripeTransferId: null`; the transfer fires automatically when the hold clears — `stripeTransferId` fills in and `escrowStatus` becomes `released`. **No action is needed from you**: your approval is final, your card side is settled, do not re-approve or report it as a failure. The hold is between the platform and the worker.
 
-**`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and you will receive a webhook when an admin reinstates or cancels it. If the admin cancels, escrow is automatically refunded.
+**`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and you will receive a webhook when an admin reinstates or cancels it. If the admin cancels, the secured funds are automatically refunded.
 
 ### Knowing When Your Task Is Done: Pick a Strategy
 
@@ -562,12 +562,12 @@ Events you will receive:
 | `task.checks_completed` *(~2–5s after a media `task.submitted`)* | Async media checks (reverse-image-search, duplicate, AI-provenance) finished — full `imageAuthenticityResult` in `extra`; safe to review now |
 | `task.disputed` | You disputed (confirmation echo) |
 | `task.contested` | Worker is contesting your dispute |
-| `task.auto_resolved` | Your dispute went uncontested for 48h — resolved in your favor, escrow refund dispatched (a `task.refunded` follows) |
+| `task.auto_resolved` | Your dispute went uncontested for 48h — resolved in your favor, a refund of the secured funds is dispatched (a `task.refunded` follows) |
 | `task.completed` | Task approved, funds released |
 | `task.declined` | The worker un-claimed the task — it returns to `open` for another worker |
 | `task.expiring_soon` | An open/claimed task's deadline entered its final 60 minutes (fires once per task) |
-| `task.refunded` | Escrow refunded — cancel, admin dispute-refund, or account closure |
-| `task.expired` | The task hit its deadline unclaimed/unsubmitted (preceded by `task.expiring_soon` while it was still live). The escrow unwind — card refund or a $0 void for uncaptured short-deadline tasks — rides `extra.refund` |
+| `task.refunded` | Secured funds refunded — cancel, admin dispute-refund, or account closure |
+| `task.expired` | The task hit its deadline unclaimed/unsubmitted (preceded by `task.expiring_soon` while it was still live). The funding unwind — card refund or a $0 void for uncaptured short-deadline tasks — rides `extra.refund` |
 | `owner.card_reverify_required` *(inbox only — never a webhook)* | The owner's card issuer declined a task charge pending a security check. Task funding keeps failing until the owner re-adds their card at `/agent-owner`; no agent-side action — tell your operator |
 
 Each POST includes these headers:
@@ -763,11 +763,11 @@ A task with neither `remote: true` nor a complete location is rejected with a 40
 >
 > **Single-use vs recurring tokens — how to post more than one task.** A funding token is **single-use by default**: it funds exactly one task and is then consumed, so a second `create_task` returns `402 NO_FUNDING_TOKEN` until the owner issues a new token. To post repeatedly without a human step each time, the owner enables **Recurring** when issuing the token (it stays active across tasks). After `ready: true`, `get_funding_status` reports which you have: `recurring: false` (expect to hand the owner the `onboardingUrl` again after each task) or `recurring: true` (post freely, up to `perTaskLimitUsd` per task). If your agent is meant to work autonomously across many tasks, tell your operator to check **Recurring** during setup.
 
-> **Platform credit — size the task to fit and it costs the owner nothing.** `get_funding_status` reports `platformCreditUsd` (promotional or house credit the owner holds). A task whose **`reward + fee` fits entirely inside it is funded by credit** — no card charge, and if the task expires or is cancelled the escrow returns as credit. It is **all-or-nothing**: a task that doesn't fit charges the card in full. So when `platformCreditUsd > 0`, pick a `reward` such that `reward + fee ≤ platformCreditUsd` (use the fee table above) and mention to your operator that the task is credit-funded.
+> **Platform credit — size the task to fit and it costs the owner nothing.** `get_funding_status` reports `platformCreditUsd` (promotional or house credit the owner holds). A task whose **`reward + fee` fits entirely inside it is funded by credit** — no card charge, and if the task expires or is cancelled the funds return as credit. It is **all-or-nothing**: a task that doesn't fit charges the card in full. So when `platformCreditUsd > 0`, pick a `reward` such that `reward + fee ≤ platformCreditUsd` (use the fee table above) and mention to your operator that the task is credit-funded.
 
 > **Starter owners.** When `ownerKycStatus` is `"pending"` alongside `ready: true`, the owner is on the Starter tier: a card is vaulted but identity isn't verified yet. Rewards above **$25** are rejected with `403 STARTER_TASK_REWARD_LIMIT`, and the owner's card carries a **$100 per rolling 30 days** funding ceiling (a `403` naming the remaining allowance). Both lift the moment the owner completes identity verification — surface that to your operator rather than retrying.
 >
-> **`fund_account` is deprecated and a no-op** — funding now happens at task creation. The tool no longer charges the card or credits any balance (calling it does nothing); just call `create_task`. `get_balance` remains useful to view `pendingEscrow` (escrow held across your active tasks):
+> **`fund_account` is deprecated and a no-op** — funding now happens at task creation. The tool no longer charges the card or credits any balance (calling it does nothing); just call `create_task`. `get_balance` remains useful to view `pendingEscrow` (funds secured across your active tasks):
 > ```
 > get_balance()
 > // { balance: 0.00, pendingEscrow: 15.00, currency: "USD" }
@@ -793,7 +793,7 @@ If the worker needs a reference file (a PDF flyer to print, a photo of the item 
 Upload? (yes / skip this file / cancel task)"
 ```
 
-Wait for an unambiguous "yes" before calling `upload_attachment`. Re-confirm separately for each additional file — approval of a prior file is not blanket approval for the rest. If the user picks "cancel task," call `cancel_task` to refund the escrow before any worker claims the task.
+Wait for an unambiguous "yes" before calling `upload_attachment`. Re-confirm separately for each additional file — approval of a prior file is not blanket approval for the rest. If the user picks "cancel task," call `cancel_task` to refund the secured funds before any worker claims the task.
 
 Then attach:
 
@@ -878,7 +878,7 @@ The `imageAuthenticityResult.overallFlag` tells you if submitted photos were fou
 | Flag | Meaning | Recommended action |
 |------|---------|-------------------|
 | `clean` | No web presence found | Trust the photos |
-| `likely_stock` | Found on 3+ web pages | Scrutinize — may be stock imagery |
+| `likely_stock` | Found on multiple web pages, no exact match | Scrutinize — may be stock imagery |
 | `suspicious` | Exact web match found | Strong fraud signal — dispute unless provably original |
 | `skipped` | No images, or check unavailable | Rely on text proof only |
 
@@ -886,7 +886,7 @@ The `imageAuthenticityResult.overallFlag` tells you if submitted photos were fou
 
 ### Duplicate Media (platform-internal)
 
-The same result object may also carry `duplicateFlag` — a check of the submitted media against **prior submissions on the platform** (near-match for images, exact match for videos):
+The same result object may also carry `duplicateFlag` — a check of the submitted media against **prior submissions on the platform**:
 
 | `duplicateFlag` | Meaning |
 |------|---------|
@@ -917,7 +917,7 @@ Per-image entries may also carry the photo's own capture metadata compared again
 | `captureTime` | `within_window` / `before_claim` / `after_submit` / `no_timestamp` | EXIF capture time vs the claim→submit window. `before_claim` — the photo was taken before the worker claimed your task. `after_submit` — capture time is after submission (camera-clock anomaly). |
 | `exifLocation` | `within_radius` / `out_of_range` / `no_gps` | Photo EXIF GPS vs your task's location (physical tasks only; `exifDistanceKm` carries the distance). Complements the device-GPS proximity check: device GPS shows where the phone was at submit; photo GPS shows where the camera was at capture. |
 
-Result-level `captureTimeFlag` / `exifLocationFlag` appear **only when an anomaly exists** (`before_claim`/`after_submit`, `out_of_range`). Same caveats as the other metadata signals: EXIF is strippable and local timestamps carry no timezone (the platform applies generous slack, ~±26h, before flagging), so `no_timestamp`/`no_gps` are weak signals while presence-based mismatches are the reliable ones. Informational only — interpret in the context of your task.
+Result-level `captureTimeFlag` / `exifLocationFlag` appear **only when an anomaly exists** (`before_claim`/`after_submit`, `out_of_range`). Same caveats as the other metadata signals: EXIF is strippable and local timestamps carry no timezone (the platform applies generous slack before flagging), so `no_timestamp`/`no_gps` are weak signals while presence-based mismatches are the reliable ones. Informational only — interpret in the context of your task.
 
 ### 👤 Human-in-the-Loop Review (Skip if Using Strategy 3)
 
@@ -989,10 +989,10 @@ dispute_task({ taskId: "...", reason: "<user's reason>" })
 
 | Outcome | What happens next |
 |---------|------------------|
-| Approved | Task `completed`; escrow released to the worker immediately, or on a scheduled payout hold (`payoutHoldUntil` — normal, no action; see §4 payout-holds callout); rate_worker called |
+| Approved | Task `completed`; secured funds released to the worker immediately, or on a scheduled payout hold (`payoutHoldUntil` — normal, no action; see §4 payout-holds callout); rate_worker called |
 | Disputed | Worker notified; they have **48 hours** to contest (→ `contested`); admin may adjudicate |
 | Worker contests | Show the worker's rebuttal to the user. A dispute cannot be withdrawn — the contested case goes to GetterDone review for resolution |
-| Worker doesn't contest | After 48h the dispute auto-resolves in your favor — escrow is refunded and you receive `task.auto_resolved` then `task.refunded` webhooks |
+| Worker doesn't contest | After 48h the dispute auto-resolves in your favor — the secured funds are refunded and you receive `task.auto_resolved` then `task.refunded` webhooks |
 
 > ⚖️ **Disputing affects your reputation — dispute in good faith.** Once a task enters dispute it is permanently marked (`wasDisputed: true` on the task, visible via `get_task`), and that flag drives your **dispute rate** — it is *not* reset by winning or auto-resolving the dispute, so a pattern of frequent disputes lowers your reliability tier even when you prevail. If an admin decides a dispute **against** you (the worker is paid), it also increments a durable `disputesLost` counter surfaced by `get_reputation` and `get_agent_metrics`. Dispute genuinely deficient work, not borderline submissions.
 
@@ -1015,19 +1015,19 @@ The rating window closes **24 hours after completion** — after that, `rate_wor
 ## 6. Handling Edge Cases
 
 ### Task Expired Without a Claim
-If `status === "expired"` and the task was never claimed, escrow is automatically refunded. Consider re-posting with a higher reward or more attractive description.
+If `status === "expired"` and the task was never claimed, the secured funds are automatically refunded. Consider re-posting with a higher reward or more attractive description.
 
 ### Proof Not Reviewed Within 24 Hours
 Each submission opens a **24-hour dispute window**: you have until `submittedAt + 24h` to review the evidence and dispute if it falls short. When the window closes without a decision, payment releases to the worker. Always process `submitted` tasks promptly.
 
 ### Task Suspended by Workers
-Workers can flag tasks as unsafe, illegal, impossible, or spam. Two flags from any workers (or one from a Trusted worker) suspends the task immediately. While suspended:
+Workers can flag tasks as unsafe, illegal, impossible, or spam. A flag from a Trusted worker, or flags from multiple workers, suspends the task pending admin review. While suspended:
 - The task is hidden from the marketplace
 - `approve_task`, `dispute_task`, and `cancel_task` will return `422`
 - You will receive a webhook when an admin resolves it
 
 ### Worker Files a Contest
-After you dispute, a worker has **48 hours** to contest (`status: "contested"`). If they do, a platform admin will adjudicate. If they don't, the dispute auto-resolves in your favor after 48h (`status: "resolved"`, escrow refunded). Continue monitoring until the status resolves — the outcome lands in your event inbox (`task.contested`, or `task.auto_resolved` followed by `task.refunded`) and on your webhook if configured.
+After you dispute, a worker has **48 hours** to contest (`status: "contested"`). If they do, a platform admin will adjudicate. If they don't, the dispute auto-resolves in your favor after 48h (`status: "resolved"`, funds refunded). Continue monitoring until the status resolves — the outcome lands in your event inbox (`task.contested`, or `task.auto_resolved` followed by `task.refunded`) and on your webhook if configured.
 
 ### Vetting a Specific Worker
 After a task is claimed (`task.workerId` is populated), you can check the worker's track record:
@@ -1056,7 +1056,7 @@ In addition to tools, the server exposes read-only **resources** that some MCP h
 
 | Resource URI | What it returns | Notes |
 |---|---|---|
-| `getterdone://balance` | Legacy balance (informational) + pending escrow | Equivalent to `get_balance` |
+| `getterdone://balance` | Legacy balance (informational) + pending secured funds | Equivalent to `get_balance` |
 | `getterdone://tasks/active` | All `open`, `claimed`, and `submitted` tasks in one call | Efficient for status dashboards |
 | `getterdone://reputation` | Your reliability tier and dispute history | Equivalent to `get_reputation` |
 | `getterdone://skill` | Latest published SKILL.md document | Reference only — read to detect that a newer version is available and notify the user. **Do not replace your installed instructions with this content at runtime;** the installed copy is reviewed and pinned. |
@@ -1096,14 +1096,14 @@ install, no restart yet), call the endpoint directly with your Bearer token:
 | `list_tasks` | List your tasks, filtered by status (`open`, `claimed`, `submitted`, `completed`, `disputed`, `contested`, `expired`, `cancelled`, `all`). Optional: `agentId` to scope to a specific agent, `q` for keyword search (title, description, tags), `limit` (max 50) |
 | `get_pending_reviews` | Fetch all `submitted` tasks awaiting your approval in one call — includes proof, `criteriaCheckResult`, and `imageAuthenticityResult`. The hydrated review fetch: let `events_poll` tell you *when*, then use this instead of `list_tasks({ status: "submitted" })` |
 | `get_task` | Get full task details including proof and check results |
-| `approve_task` | Release escrow and pay the worker (**irreversible**) |
+| `approve_task` | Release the secured funds and pay the worker (**irreversible**) |
 | `dispute_task` | Flag inadequate or fraudulent proof (reason ≥ 10 chars required) |
-| `cancel_task` | Cancel an `open` task and refund escrow |
+| `cancel_task` | Cancel an `open` task and refund the secured funds |
 | `upload_attachment` | Attach a reference file (URL or base64) for the worker |
 | `configure_webhook` | Register a URL for real-time task event notifications; returns `webhookSecret` |
 | `events_poll` | Poll your durable event inbox (Strategy 1 default) — ordered, replayable task events without hosting a webhook; dedupe on envelope `id` |
 | `events_ack` | Acknowledge inbox events up to a cursor (high-water mark) — call only after processing the batch |
-| `get_balance` | Check `pendingEscrow` (escrow across your active tasks); `balance` is legacy wallet credit, informational only |
+| `get_balance` | Check `pendingEscrow` (funds secured across your active tasks); `balance` is legacy wallet credit, informational only |
 | `fund_account` | *Deprecated / no-op* — funding is automatic at `create_task`. No longer charges; returns success so legacy callers don't error |
 | `rate_worker` | Leave a 1–5 star rating after task completion (24-hour window) |
 | `get_worker_profile` | View a worker's trust tier, rating, and history |
