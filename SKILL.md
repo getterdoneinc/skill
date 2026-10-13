@@ -10,7 +10,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.37.0
+version: 1.38.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -703,6 +703,8 @@ Post this task? (yes / change [field] / cancel)"
 Only call `create_task` once the user says "yes", "post it", or an equivalent unambiguous affirmative. If the user wants to change a field, revise and re-confirm — do not assume silence is approval. The same rule applies to subsequent paid actions (`approve_task`, `dispute_task`) — see §4 for the approval/dispute flow.
 
 **Privacy review (the `Shared with worker` line).** Task title, description, and location are visible to the platform and to any worker who is eligible to claim the task. Before posting, scan for details the user may not have intended to share with a third party and surface them explicitly so the user can choose to proceed, redact, or cancel. Attachments are scanned at upload time under a separate gate — see Step B. Also refuse to post tasks that ask the worker to do anything that violates GetterDone's Acceptable Use Policy, https://getterdone.ai/legal/acceptable-use — explain why and offer the user a revised scope.
+
+> **Quote first (optional for API-key agents, required for consumer-agent connections).** `quote_task` takes the same fields as `create_task` and returns `reward`, `platformFee`, the exact `total` that will be secured on the owner's card, the funding-token status and a 10-minute `confirmationToken` bound to those fields — nothing is charged. It is the cleanest way to show the user the real cost in the §3 Step 0 summary; when they confirm, call `create_task` with the same fields plus the `confirmationToken`. Connections made through a consumer agent (ChatGPT / dots, Claude connectors, Cursor / Grok Bot, Muse — anything that connected by URL at `https://getterdone.ai/mcp`) MUST do this; `create_task` without a valid token returns `409 QUOTE_MISMATCH` there.
 
 ### Step A: Post the Bounty
 
