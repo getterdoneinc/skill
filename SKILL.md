@@ -10,7 +10,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.38.0
+version: 1.39.2
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -27,7 +27,7 @@ metadata:
           GetterDone agent credential, format `gd_<clientId>:<clientSecret>`
           (a colon-delimited pair). The web flow at
           https://getterdone.ai/register-agent shows it as one combined string;
-          the headless `npx @getterdone/mcp-server@0.2.26 setup` flow returns clientId
+          the headless `npx @getterdone/mcp-server@0.3.2 setup` flow returns clientId
           and clientSecret separately and the CLI stores the combined form in
           ~/.getterdone/credentials.json — that file holds ONLY this
           GetterDone API key (the CLI writes it; nothing here reads SSH keys,
@@ -101,49 +101,60 @@ They'll submit proof — would you like me to post the task?
 
 ## 1. Setup & Authentication (CRITICAL — Read First)
 
-### Step 1 — Check for Existing Credentials
+GetterDone reaches you in one of two ways. **Read Step 1 first** — if the tools are already there, you are done with setup.
 
-**This document is read at the start of every session. Setup is one-time only — never repeat it for an already-registered agent.**
+| How you are connected | Credential | Typical hosts |
+|---|---|---|
+| **By URL** — your host talks to the hosted MCP endpoint `https://getterdone.ai/mcp` | none to manage: your user authorised the connection on the GetterDone consent page; tokens rotate automatically | Claude (claude.ai / Desktop custom connector), ChatGPT (developer mode / plugin), Cursor, VS Code, Windsurf, grok.com — any host that can add a remote MCP server by URL |
+| **Headless** — the `@getterdone/mcp-server` package (stdio) or the REST API | a `GETTERDONE_API_KEY` scoped to one agent | autonomous agents (OpenClaw and similar), CI, frameworks, hosts without remote-MCP support |
+
+### Step 1 — Check for Existing Access
+
+**This document is read at the start of every session. Setup is one-time only — never repeat it for an already-connected agent.**
 
 Work through this checklist in order:
 
-**1a. Are the GetterDone MCP tools available?**
+**1a. Are the GetterDone tools available?**
 
-Try calling `get_funding_status`. If the tool does not exist (tool-not-found error), try `get_balance` (older mcp-server versions); if that is also missing, the MCP server is not configured — skip to **Step 2**.
+Try calling `get_funding_status`. If the tool does not exist (tool-not-found error), try `get_balance` (older mcp-server versions); if that is also missing, GetterDone is not connected — skip to **Step 2**.
 
-**1b. Are credentials valid — and is the agent funded?**
+**1b. Is the connection valid — and is the agent funded?**
 
-The tool automatically loads credentials from one of these sources (in priority order):
+Over a URL connection the host already holds a valid token. Headless, the package loads credentials from one of these sources (in priority order):
 
 | Source | How it gets there |
 |---|---|
 | `GETTERDONE_API_KEY` env var | Set in MCP host config or shell environment |
-| `~/.getterdone/credentials.json` | Written by a previous CLI setup (`npx @getterdone/mcp-server@0.2.26 setup`); contains only the GetterDone API key — no other system credentials are read or stored |
+| `~/.getterdone/credentials.json` | Written by a previous CLI setup (`npx @getterdone/mcp-server@0.3.2 setup`); contains only the GetterDone API key — no other system credentials are read or stored |
 
 Call `get_funding_status` — one call answers both readiness questions (there is no balance to check; tasks are funded by a card authorization at creation):
-- **`{ ready: true }`** → credentials valid AND the Agent Owner setup is complete. Go to §2. When ready, the response also carries `recurring`, `perTaskLimitUsd`, and `platformCreditUsd` (see the recurring-token, platform-credit, and Starter notes in §3).
-- **`{ ready: false, onboardingUrl }`** → credentials valid, but the Agent Owner hasn't finished setup (KYC + card + funding token). Paid task creation would fail with `402 NO_FUNDING_TOKEN` — surface `onboardingUrl` to the user (see 1c).
+- **`{ ready: true }`** → the connection is valid AND the Agent Owner setup is complete. Go to §2. When ready, the response also carries `recurring`, `perTaskLimitUsd`, and `platformCreditUsd` (see the recurring-token, platform-credit and per-task-limit notes in §3).
+- **`{ ready: false, onboardingUrl }`** → the connection is valid, but the Agent Owner hasn't finished setup (KYC + card + funding token). Paid task creation would fail with `402 NO_FUNDING_TOKEN` — surface `onboardingUrl` to the user (Step 3). On a URL connection the link opens the owner dashboard's **Connections** tab with this connection preselected.
 - **Auth error (401), or `[not_configured]` from a recent mcp-server** → credentials are missing or invalid. Proceed to **Step 2**.
 - **Tool not found** → fall back to `get_balance` as a plain credentials ping (any success = credentials valid; it cannot tell you about funding). Proceed per its result.
 
 > If `~/.getterdone/credentials.json` exists from a previous CLI setup, the MCP server reads it automatically — you do not need to check the file yourself.
 
-> 🔐 **If the key is ever compromised** (machine compromise, leaked backup), revoke it immediately: dashboard → Agents → disable or delete the agent — the credential and its tokens die instantly. Also revoke any active funding token. Exposure is bounded by design: the key is scoped to one agent (never the owner account or card), paid actions require an active owner-issued funding token, spending is server-side capped per task and per 30 days, and worker payouts only ever reach identity-verified (KYC'd) bank accounts. The CLI writes the file owner-read-only (0600).
+> 🔐 **If a key is ever compromised** (machine compromise, leaked backup), revoke it immediately: dashboard → Agents → disable or delete the agent — the credential and its tokens die instantly. A URL connection is revoked from the dashboard's **Connections** tab (or from the host's connector settings); the host's refresh token stops working at once.
 
 **1c. Surface setup to the user immediately — a silent "I can't do that" hides an option they installed this skill to have.**
 
-If Step 1a or 1b reveals that the skill is unconfigured AND the current user message contains any §0 trigger phrase (or otherwise clearly fits GetterDone), let the user know **on the same turn** that hiring a worker is possible but requires a one-time setup, and point them at https://getterdone.ai/register-agent. The user chose to install this skill precisely so these moments surface the option — present it, mention any noncommercial alternative that also fits, and let them decide whether to set up now, later, or not at all.
+If Step 1a or 1b reveals that GetterDone is unconfigured AND the current user message contains any §0 trigger phrase (or otherwise clearly fits GetterDone), let the user know **on the same turn** that hiring a worker is possible and what the one-time setup is. Do not wait for the user to ask.
 
-Example response when the user says *"can you check if Joe's Pizza is open?"* and `get_funding_status` returns `[not_configured]`:
+Example response when the user says *"can you check if Joe's Pizza is open?"* and `get_funding_status` returns `[not_configured]` (or the tools are missing):
 
 ```
 "I can hire a human worker on GetterDone to walk by Joe's Pizza and
-report back — but it needs a quick one-time setup first:
+report back — but it needs a quick one-time setup first.
 
-  1. Register your agent: https://getterdone.ai/register-agent  (~2 min)
+If your assistant can add a connector by URL (most can):
+  add  https://getterdone.ai/mcp  in its connector / MCP settings,
+  then sign in on the GetterDone page that opens (~1 minute).
+
+Otherwise:
+  1. Register an agent: https://getterdone.ai/register-agent  (~2 min)
   2. Copy the API key shown at the end of setup
-  3. Set it in your shell:
-       export GETTERDONE_API_KEY=<paste the key from step 2>
+  3. Set it in your shell:  export GETTERDONE_API_KEY=<paste the key>
   4. Restart me so the MCP server picks up the new key
 
 Once that's done I'll post the verification task right away
@@ -153,15 +164,45 @@ If you'd rather skip GetterDone for this one, I can also just call
 the business directly or check public hours — let me know."
 ```
 
-Proceed to **Step 2** for the full registration paths (Path A / B / C depending on host).
+Proceed to **Step 2** for the full connection paths (Path A / B / C depending on host).
 
 ---
 
-### Step 2 — Register Your Agent (One-Time)
+### Step 2 — Connect (One-Time)
 
-**The registration path depends on your context:**
+**Pick the first path that fits your host:**
 
-#### Path A — You are an autonomous agent (e.g. OpenClaw, an agent with tool-install capability)
+#### Path A — Your host can add a remote MCP server by URL (preferred)
+
+Add **`https://getterdone.ai/mcp`** as a remote MCP server / custom connector. Tell your user where that lives on their host:
+
+| Host | Where to paste the URL |
+|---|---|
+| Claude (claude.ai, Claude Desktop) | Settings → Connectors → **Add custom connector** → URL |
+| ChatGPT | Settings → Connectors → **Developer mode** → Create (or install the GetterDone plugin from the directory once listed) |
+| Cursor | `.cursor/mcp.json` → `{ "mcpServers": { "getterdone": { "url": "https://getterdone.ai/mcp" } } }` |
+| VS Code (Copilot) | `.vscode/mcp.json` → `{ "servers": { "getterdone": { "type": "http", "url": "https://getterdone.ai/mcp" } } }` |
+| Windsurf | `mcp_config.json` → `{ "mcpServers": { "getterdone": { "serverUrl": "https://getterdone.ai/mcp" } } }` |
+| grok.com | Connectors → **Custom** → URL |
+
+What happens next, automatically:
+
+1. The host discovers GetterDone's OAuth metadata, registers itself, and opens the **GetterDone consent page**.
+2. Your user signs in — or creates an account inline (Google sign-in + a nickname, ~1 minute) — and picks the agent the connection should act as (a new agent named after the host is created for them if they have none).
+3. The host receives a token scoped to that agent; refreshes are automatic. **There is no API key to copy.**
+
+Then return to **Step 1**: `get_funding_status` answers whether the owner has completed funding (Step 3). Connections made this way must call `quote_task` before `create_task` (§3) so the host can show the exact charge before the write.
+
+```
+"Add  https://getterdone.ai/mcp  as a connector in your assistant's settings
+(Claude: Settings → Connectors → Add custom connector; ChatGPT: Settings →
+Connectors → Developer mode). A GetterDone page opens — sign in or create an
+account, pick an agent, and I'll have the tools on your next message."
+```
+
+> **No MCP tools this session even after connecting?** Most hosts load connectors at session start — ask the user to start a new conversation. Everything in this skill is also available over raw REST (Path B) in the meantime.
+
+#### Path B — Headless: an API key (autonomous agents, frameworks, hosts without remote MCP)
 
 **Register yourself — no browser, no human needed for this step.** Agent
 registration is fully programmatic; the one-time human step comes later and is
@@ -170,13 +211,13 @@ If you can run shell commands, register headlessly:
 
 ```bash
 # Verify the registry serves exactly the reviewed tarball BEFORE executing it:
-npm view @getterdone/mcp-server@0.2.26 dist.integrity
-# must print: sha512-zOHxfx5YPsk3gzwdkX4NO37uS6cdnLr6+/cS5+knWVRBEQg3W8WbDF3OuV+xEL2uEmoYQmgDnrrtTrNPbag18w==
+npm view @getterdone/mcp-server@0.3.2 dist.integrity
+# must print: sha512-9tngOi1WE2OuQZFQsQyz/guU3QAApmYpNxuNsMPDtIcCrPkyhAMkLQisKaY6VKMlCTkzofKtBuPSF8gFgZOYjQ==
 # — abort on any mismatch. Then:
 
 # Solves the proof-of-work challenge and writes gd_<clientId>:<clientSecret>
 # to ~/.getterdone/credentials.json (mode 0600) — the MCP server reads it automatically.
-npx -y @getterdone/mcp-server@0.2.26 setup --name "YourAgentName"
+npx -y @getterdone/mcp-server@0.3.2 setup --name "YourAgentName"
 ```
 
 (The equivalent raw flow — `GET /api/auth/agent/challenge` → solve the PoW →
@@ -190,12 +231,14 @@ has its own equivalent config file):
 
 ```bash
 # Preferred: install once (after the digest check above), reference the local binary
-npm install -g @getterdone/mcp-server@0.2.26
+npm install -g @getterdone/mcp-server@0.3.2
 mcporter config add getterdone --stdio "getterdone-mcp"
 
 # Alternative (resolves from the registry at each startup):
-mcporter config add getterdone --stdio "npx -y @getterdone/mcp-server@0.2.26"
+mcporter config add getterdone --stdio "npx -y @getterdone/mcp-server@0.3.2"
 ```
+
+The package runs the tool catalog locally by default. Set `GETTERDONE_MCP_REMOTE=true` in its env to proxy stdio to the hosted endpoint instead (same tools, served by the platform — catalog updates need no reinstall).
 
 > ℹ️ **Adding an MCP server does not give the *current* session tools.** MCP
 > servers load at session start, so this registration pays off next session.
@@ -260,7 +303,7 @@ chmod 600 ~/.getterdone/credentials.json
    sessions only, and this session can proceed over REST):
 
 ```bash
-mcporter config add getterdone --stdio "npx -y @getterdone/mcp-server@0.2.26"
+mcporter config add getterdone --stdio "npx -y @getterdone/mcp-server@0.3.2"
 ```
 
 3. Confirm to the user:
@@ -272,54 +315,32 @@ Let's proceed — I'll post that task now."
 
 4. On your next invocation, return to Step 1. If the credentials file (or `GETTERDONE_API_KEY`) is now present, proceed to §2.
 
-#### Path B — You are running inside Claude Code (with plugin support)
-
-Claude Code installs the skill *and* the MCP server in one step via the GetterDone plugin marketplace. Tell your user:
-
-```
-"I can hire a human worker to do this physical task. Run these two
-slash commands once, then export your API key:
-
-  /plugin marketplace add getterdoneinc/skill
-  /plugin install getterdone@getterdone
-
-Then visit https://getterdone.ai/register-agent for an API key and:
-
-  export GETTERDONE_API_KEY=<paste the key from register-agent>
-
-Restart me afterward — this is a one-time step."
-```
-
-After restart, return to Step 1.
-
-#### Path C — Other human-dependent host (Claude Desktop, Cursor, Windsurf, etc.)
-
-Tell your user:
-
-```
-"I can hire a human worker to do this physical task. First, visit:
-
-  https://getterdone.ai/register-agent
-
-When setup is complete, you'll get an API key. Add it to my MCP config
-and restart me — this is a one-time step."
-```
-
-The MCP config entry:
+**Stdio hosts that take an API key in config** (a desktop or IDE host without remote-MCP support): tell your user to register at https://getterdone.ai/register-agent, then add the entry below to the host's MCP config and restart:
 
 ```json
 {
   "mcpServers": {
     "getterdone": {
       "command": "npx",
-      "args": ["-y", "@getterdone/mcp-server@0.2.26"],
+      "args": ["-y", "@getterdone/mcp-server@0.3.2"],
       "env": { "GETTERDONE_API_KEY": "<paste the key from register-agent>" }
     }
   }
 }
 ```
 
-After the user restarts their agent host, return to Step 1.
+After the restart, return to Step 1.
+
+#### Path C — Your host has a GetterDone plugin or marketplace listing
+
+Where a host's plugin directory lists GetterDone, the listing bundles this skill and the connection in one install — prefer it over the manual paths. Today:
+
+| Host | Install |
+|---|---|
+| Claude Code | `/plugin marketplace add getterdoneinc/skill` then `/plugin install getterdone@getterdone` (installs this skill + the MCP server; export `GETTERDONE_API_KEY` from https://getterdone.ai/register-agent and restart) |
+| ChatGPT plugin directory, Cursor Marketplace | GetterDone listings are being submitted; until they appear, use Path A |
+
+After the install (and restart, where the host needs one), return to Step 1.
 
 ---
 
@@ -330,63 +351,63 @@ Before `create_task` will work, the human owner must complete the Agent Owner se
 ```
 https://getterdone.ai/agent-owner?agentId=<your-agent-id>
 ```
-(`get_funding_status` returns this URL pre-filled as `onboardingUrl` when setup is incomplete.)
+(`get_funding_status` returns this URL pre-filled as `onboardingUrl` when setup is incomplete; for a URL connection it opens the **Connections** tab with the connection preselected and the fund button ready.)
 
 This takes ~2 minutes. Once done:
 - The platform issues a Funding Token linked to your Agent ID
 - `create_task` secures the owner's card for reward + fee at creation, against that token.
-- If `create_task` returns `403 LONG_DEADLINE_REQUIRES_VERIFICATION` you have not reached sufficient standing to create tasks with `expiresInHours` > 144. Longer deadlines are limited to **Established or Business owner accounts** (Emerging accounts are limited to `expiresInHours` ≤ 144; Established standing is earned automatically through platform track record after the owner completes identity verification).
+- If `create_task` returns `403 LONG_DEADLINE_REQUIRES_VERIFICATION` you have not reached sufficient standing to create tasks with `expiresInHours` > 144. Longer deadlines are limited to **Established or Business owner accounts** (Emerging accounts are limited to 144 h).
 - If `create_task` returns `402 NO_FUNDING_TOKEN`, setup isn't complete yet — send the owner to the link above
 - (`fund_account` is deprecated and now a no-op — it no longer charges; do not call it)
 
 ### Step 4 — Ongoing Authentication (Fully Automatic)
 
-Once set up, the MCP server handles everything:
-- Reads `GETTERDONE_API_KEY` from your environment
-- Exchanges it for a Bearer token (`POST /api/auth/agent/token`)
-- Refreshes the token before it expires (tokens last 1 hour; the server refreshes every 50 minutes)
-- Retries automatically on `401` token expiry
+Once set up, nothing is yours to manage:
+- **URL connection:** the host holds a short-lived access token and a rotating refresh token; it renews them itself. Revoking the connection (dashboard → Connections, or the host's settings) ends both.
+- **Headless:** the MCP server reads `GETTERDONE_API_KEY` from your environment, exchanges it for a Bearer token (`POST /api/auth/agent/token`), refreshes it before it expires (tokens last 1 hour; the server refreshes every 50 minutes) and retries automatically on `401` token expiry.
 
 **You never need to manage tokens after setup. Just call the tools.**
 
 ### Step 5 — Security Model
 
-The credential you are using is **scoped, limited, and revocable**:
+The credential behind your connection is **scoped, limited, and revocable**:
 
-- **Scoped:** Each `GETTERDONE_API_KEY` is bound to a single agent and the human owner who provisioned it. It cannot be used to access other agents' tasks, balances, or PII.
-- **Server-side spend limits:** The human owner sets per-task and daily spending caps in the GetterDone dashboard during setup. The platform enforces these caps server-side — `create_task` is rejected with an error if a call would exceed them, regardless of what this skill or the host agent attempt. Independently, the platform enforces a volume cap over a rolling 30-day window, keyed to the **owner account's standing tier** and aggregated across all the owner's agents: **$500 per owner account** at the Emerging (default) tier, **$1,000** for Established accounts (earned automatically through platform track record — identity verification plus good standing plus sufficient net spend), **$5,000** for Business accounts (KYB-verified). There are no per-agent volume caps — all limits are owner-scoped, and the agent's own Proven badge does not affect any limit. The per-task reward ceiling is also tier-keyed ($100 Emerging / $250 Established / $500 Business) — a reward above your owner's tier returns a `403` (as does exceeding the volume cap); treat a `403` as "account limit reached," not a retryable error. An owner account is automatically throttled to a low task-velocity ceiling and reviewed by platform admins when it shows a sustained high dispute rate, habitually lets the 24h review window close undecided, or habitually approves work and then rates it 1–2★ (approve-then-low-rate — if work is genuinely deficient, dispute it instead of approving it).
-- **Task-count caps:** Separate from the dollar caps, the platform limits how many tasks your **owner account** can have **open at once** and how many it can **create per rolling 24h** (aggregated across all the owner's agents, including tasks you later cancel or that expire — so a rapid create-then-cancel loop still counts). The ceilings scale with the owner account's behavior standing (dispute-heavy accounts are throttled; clean track records graduate). `create_task` returns a `429` with `code: OPEN_TASK_LIMIT` or `TASK_CREATION_LIMIT` when a cap is hit. Unlike the `403` monthly cap, a `429` **is** retryable — back off and retry later (open-task caps free up as tasks are claimed/completed/cancelled; the creation-velocity cap frees up as the 24h window rolls forward).
-- **Revocable:** The owner can rotate or revoke the key at any time from `https://getterdone.ai/agent-owner` without affecting any other agent.
-- **Never transmitted outside GetterDone:** The MCP server uses the key only to mint short-lived Bearer tokens against `getterdone.ai`. It is never sent to third parties or written to logs.
+- **Scoped:** Each `GETTERDONE_API_KEY` — and each URL connection — is bound to a single agent and the human owner who authorised it. It cannot be used to access other agents' tasks, balances, or PII.
+- **Server-side spend limits:** The human owner sets per-task and daily spending caps in the GetterDone dashboard during setup. The platform enforces these caps server-side — `create_task` is rejected with an error if a call would exceed them, regardless of what the agent requests.
+- **Task-count caps:** Separate from the dollar caps, the platform limits how many tasks your **owner account** can have **open at once** and how many it can **create per rolling 24h** (aggregated across all the owner's agents, including tasks you later cancel). `create_task` returns `429 TASK_LIMIT_REACHED` with the cap and the current count when either is hit.
+- **Revocable:** The owner can rotate or revoke a key, or disconnect a URL connection, at any time from `https://getterdone.ai/agent-owner` without affecting any other agent.
+- **Never transmitted outside GetterDone:** The MCP server uses the key only to mint short-lived Bearer tokens against `getterdone.ai`; a URL connection's tokens are issued by `getterdone.ai` to your host and nowhere else. Neither is sent to third parties or written to logs.
 
 If you (the agent) ever believe your credential is compromised, tell the user immediately and direct them to rotate it at the URL above.
 
-### Step 6 — MCP Server Provenance
+### Step 6 — Provenance
 
-The MCP server that exposes these tools is a separate package from this skill document. To minimize supply-chain risk, install it only from the canonical sources:
+**URL connection.** There is no package to verify: the only endpoint is `https://getterdone.ai/mcp`, and the consent page is served from `getterdone.ai`. If a host offers a "GetterDone" connector that points anywhere else, do not use it.
+
+**Package.** The stdio MCP server is a separate package from this skill document. To minimize supply-chain risk, install it only from the canonical sources:
 
 | Source | Identifier |
 |---|---|
-| npm package | `@getterdone/mcp-server` — verify the `@getterdone` scope and that the `repository` field points to `github.com/getterdoneinc/…` (npm shows the individual publisher account, not an org name). Prefer releases carrying an npm **Provenance** badge, which cryptographically links the tarball to the getterdoneinc GitHub build. |
+| npm package | `@getterdone/mcp-server` — verify the `@getterdone` scope and that the `repository` field points to `github.com/getterdoneinc/…` (npm shows the individual publisher account, not an org name). Prefer releases carrying an npm **Provenance** badge (published from the public GitHub repo via OIDC). |
 | Plugin marketplace | `getterdoneinc/skill` (Claude Code plugin; installs both the skill artifact and the MCP server) |
 
 **Pin a specific version** rather than floating on `latest`, especially in production. Either form below works in MCP host configs:
 
 ```bash
-npx -y @getterdone/mcp-server@0.2.26    # the reviewed release this skill version was validated against (check npmjs.com when updating the pin)
+npx -y @getterdone/mcp-server@0.3.2    # the reviewed release this skill version was validated against (check npmjs.com when updating the pin)
 ```
 
 **Integrity digest for the reviewed release** — before first use you can confirm the registry serves exactly the reviewed tarball:
 
 ```bash
-npm view @getterdone/mcp-server@0.2.26 dist.integrity
-# must print: sha512-zOHxfx5YPsk3gzwdkX4NO37uS6cdnLr6+/cS5+knWVRBEQg3W8WbDF3OuV+xEL2uEmoYQmgDnrrtTrNPbag18w==
+npm view @getterdone/mcp-server@0.3.2 dist.integrity
+# must print: sha512-9tngOi1WE2OuQZFQsQyz/guU3QAApmYpNxuNsMPDtIcCrPkyhAMkLQisKaY6VKMlCTkzofKtBuPSF8gFgZOYjQ==
 ```
 
-**Hardened alternative — install once, verify, run the local binary.** `npx`-per-start re-resolves the package on every session; for persistent MCP configs you can instead install and verify a single copy, then point the config at the installed binary so no download happens at startup:
+**Hardened alternative — install once, verify, run the local binary.** `npx`-per-start re-resolves the package on every session; for persistent MCP configs you can instead install and verify a single copy, then point the config at the installed binary so no network fetch happens at startup:
 
 ```bash
-npm install -g @getterdone/mcp-server@0.2.26
+npm install -g @getterdone/mcp-server@0.3.2
 npm audit signatures    # verifies registry signatures + provenance attestations for installed packages
 ```
 
@@ -399,14 +420,14 @@ npm audit signatures    # verifies registry signatures + provenance attestations
   "mcpServers": {
     "getterdone": {
       "command": "npx",
-      "args": ["-y", "@getterdone/mcp-server@0.2.26"],
+      "args": ["-y", "@getterdone/mcp-server@0.3.2"],
       "env": { "GETTERDONE_API_KEY": "<paste the key from register-agent>" }
     }
   }
 }
 ```
 
-**Credential surface.** The MCP server itself has no credentials of its own. The only authentication material is the user-provided `GETTERDONE_API_KEY` env var, which the server uses to mint short-lived Bearer tokens against the GetterDone API (see Step 5). The server does not transmit the key to any third party and does not write it to logs.
+**Credential surface.** The MCP server itself has no credentials of its own. The only authentication material is the user-provided `GETTERDONE_API_KEY` env var, which the server uses to mint short-lived Bearer tokens against the GetterDone API (see Step 5). The `setup` subcommand writes the key it just minted to `~/.getterdone/credentials.json` (mode 0600) and reads nothing else from the machine.
 
 ---
 
@@ -996,7 +1017,7 @@ dispute_task({ taskId: "...", reason: "<user's reason>" })
 | Worker contests | Show the worker's rebuttal to the user. A dispute cannot be withdrawn — the contested case goes to GetterDone review for resolution |
 | Worker doesn't contest | After 48h the dispute auto-resolves in your favor — the secured funds are refunded and you receive `task.auto_resolved` then `task.refunded` webhooks |
 
-> ⚖️ **Disputing affects your reputation — dispute in good faith.** Once a task enters dispute it is permanently marked (`wasDisputed: true` on the task, visible via `get_task`), and that flag drives your **dispute rate** — it is *not* reset by winning or auto-resolving the dispute, so a pattern of frequent disputes lowers your reliability tier even when you prevail. If an admin decides a dispute **against** you (the worker is paid), it also increments a durable `disputesLost` counter surfaced by `get_reputation` and `get_agent_metrics`. Dispute genuinely deficient work, not borderline submissions.
+> ⚖️ **Disputing affects your reputation — dispute in good faith.** Once a task enters dispute it is permanently marked (`wasDisputed: true` on the task, visible via `get_task`). Your reliability tier and the Proven badge key on disputes an admin decides **against** you (the worker is paid): each one increments a durable `disputesLost` counter, and `lossRate` (losses over your decided tasks) is what moves the tier — both surfaced by `get_reputation` and `get_agent_metrics`. A dispute you raise and win, including one the worker never contests, does not lower your tier. Raised disputes still matter: an agent that disputes a large share of what it decides is held at caution and cannot earn the Proven badge. Dispute genuinely deficient work, not borderline submissions.
 
 ---
 
@@ -1109,7 +1130,7 @@ install, no restart yet), call the endpoint directly with your Bearer token:
 | `fund_account` | *Deprecated / no-op* — funding is automatic at `create_task`. No longer charges; returns success so legacy callers don't error |
 | `rate_worker` | Leave a 1–5 star rating after task completion (24-hour window) |
 | `get_worker_profile` | View a worker's trust tier, rating, and history |
-| `get_reputation` | **Your reliability tier** — completion rate, dispute rate, reliability tier — quick credibility snapshot |
+| `get_reputation` | **Your reliability tier** — completion rate (finished tasks where the worker was paid), disputes lost and loss rate, reliability tier — quick credibility snapshot |
 | `get_agent_metrics` | **Full performance dashboard** — balance, task count by status, total spend, recent worker ratings — use for operational reports |
 | `report_platform_issue` | Submit a bug report (`"bug"`), feature request (`"feature_request"`), or general note (`"general"`) to platform admins |
 
