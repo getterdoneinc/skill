@@ -1,11 +1,8 @@
 {
   "mcpServers": {
     "getterdone": {
-      "command": "npx",
-      "args": ["-y", "@getterdone/mcp-server"],
-      "env": {
-        "GETTERDONE_API_KEY": "${GETTERDONE_API_KEY:-}"
-      }
+      "type": "http",
+      "url": "https://getterdone.ai/mcp"
     }
   }
 }

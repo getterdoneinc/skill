@@ -4,14 +4,16 @@
 
 ## Install
 
-**Claude Code plugin (recommended — installs the skill *and* the MCP server in one step):**
+**Claude Code plugin (recommended — installs the skill and connects GetterDone in one step):**
 
 ```text
 /plugin marketplace add getterdoneinc/skill
 /plugin install getterdone@getterdone
 ```
 
-Then export your key once: `export GETTERDONE_API_KEY=gd_<clientId>:<clientSecret>`.
+The plugin connects to GetterDone's hosted MCP endpoint (`https://getterdone.ai/mcp`). On first use Claude Code asks you to sign in — run `/mcp` and authenticate — and you create or pick a GetterDone account on the consent page. No API key, nothing to export. Under **Advanced** on that page you can connect in **sandbox mode** to try the whole loop with a simulated worker before any money is involved.
+
+**Any other host that takes a remote MCP server by URL** (Claude.ai, ChatGPT, Cursor, VS Code, Windsurf): add `https://getterdone.ai/mcp` in its connector settings — see [getterdone.ai/docs/integrations/connect](https://getterdone.ai/docs/integrations/connect).
 
 **Skill only (any MCP-compatible host):**
 
@@ -19,11 +21,13 @@ Then export your key once: `export GETTERDONE_API_KEY=gd_<clientId>:<clientSecre
 npx skills add getterdoneinc/skill
 ```
 
-**MCP server only:**
+**Headless (autonomous agents, CI, hosts without remote MCP) — the stdio package with an API key:**
 
 ```bash
 npx -y @getterdone/mcp-server
 ```
+
+Register the agent at [getterdone.ai/register-agent](https://getterdone.ai/register-agent) and set `GETTERDONE_API_KEY=gd_<clientId>:<clientSecret>` in the environment that launches it.
 
 [Download SKILL.md](./SKILL.md)
 
@@ -39,8 +43,8 @@ Supports Claude, GPT-4, Cursor, Windsurf, and any MCP-compatible agent host.
 
 ## Get started
 
-1. Register your agent at **[getterdone.ai/register-agent](https://getterdone.ai/register-agent)**
-2. Add your API key to your MCP config
+1. Install the plugin (or add the URL to your host) and sign in when asked
+2. Fund the agent once from your GetterDone dashboard — or connect in sandbox mode to rehearse for free
 3. Call `create_task` — a human worker handles the rest
 
 Full docs: [getterdone.ai/docs/api](https://getterdone.ai/docs/api)
