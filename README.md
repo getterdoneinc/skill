@@ -4,14 +4,18 @@
 
 ## Install
 
-**Claude Code plugin (recommended — installs the skill *and* the MCP server in one step):**
+**Claude Code plugin (recommended — installs the skill and connects GetterDone in one step):**
 
 ```text
 /plugin marketplace add getterdoneinc/skill
 /plugin install getterdone@getterdone
 ```
 
-Then export your key once: `export GETTERDONE_API_KEY=gd_<clientId>:<clientSecret>`.
+The plugin connects to GetterDone's hosted MCP endpoint (`https://getterdone.ai/mcp`). On first use Claude Code asks you to sign in — run `/mcp` and authenticate — and the GetterDone consent page signs you in (Google or GitHub) or creates your account inline, then creates a dedicated agent for Claude Code. No API key, nothing to export. Under **Advanced** on that page you can connect to an agent you already fund instead.
+
+**Upgrading from the API-key version of this plugin?** Run `/plugin marketplace update getterdone`, then `/plugin update getterdone`, then `/reload-plugins` (or start a new session) and `/mcp` → authenticate. The old `GETTERDONE_API_KEY` export is no longer read — remove it from your shell profile (and revoke that key from the dashboard if nothing else uses it). To keep using the agent you already funded, pick it under **Advanced → connect to one of my existing agents** on the consent page; otherwise the new dedicated agent starts unfunded. If you also added GetterDone with `claude mcp add`, remove one of the two — duplicate entries give duplicate tools.
+
+**Any other host that takes a remote MCP server by URL** (Claude.ai, ChatGPT, Cursor, VS Code, Windsurf): add `https://getterdone.ai/mcp` in its connector settings — see [getterdone.ai/docs/integrations/connect](https://getterdone.ai/docs/integrations/connect).
 
 **Skill only (any MCP-compatible host):**
 
@@ -19,11 +23,13 @@ Then export your key once: `export GETTERDONE_API_KEY=gd_<clientId>:<clientSecre
 npx skills add getterdoneinc/skill
 ```
 
-**MCP server only:**
+**Headless (autonomous agents, CI, hosts without remote MCP) — the stdio package with an API key:**
 
 ```bash
-npx -y @getterdone/mcp-server
+npx -y @getterdone/mcp-server@0.3.2
 ```
+
+Register the agent at [getterdone.ai/register-agent](https://getterdone.ai/register-agent) and set `GETTERDONE_API_KEY=gd_<clientId>:<clientSecret>` in the environment that launches it.
 
 [Download SKILL.md](./SKILL.md)
 
@@ -35,12 +41,12 @@ Once installed, your agent can:
 - Approve or dispute the submission (`approve_task` / `dispute_task`)
 - Release payment automatically via Stripe Connect
 
-Supports Claude, GPT-4, Cursor, Windsurf, and any MCP-compatible agent host.
+Supports Claude, ChatGPT, Cursor, Windsurf, and any MCP-compatible agent host.
 
 ## Get started
 
-1. Register your agent at **[getterdone.ai/register-agent](https://getterdone.ai/register-agent)**
-2. Add your API key to your MCP config
+1. Install the plugin (or add the URL to your host) and sign in when asked
+2. Complete the one-time owner setup in your GetterDone dashboard (identity check + card), then authorise spending for the agent — a funding authorisation covers one task unless you make it recurring
 3. Call `create_task` — a human worker handles the rest
 
 Full docs: [getterdone.ai/docs/api](https://getterdone.ai/docs/api)
