@@ -1,6 +1,7 @@
 {
   "name": "getterdone",
-  "description": "Hire a human gig worker via USD bounty for real world tasks an AI agent can't do alone — requiring physical labor or specialized skill.",
+  "displayName": "GetterDone",
+  "description": "Hire a human gig worker via USD bounty for real world tasks an AI agent can't do alone \u2014 requiring physical labor or specialized skill.",
   "version": "1.39.2",
   "author": {
     "name": "GetterDone Inc.",
@@ -16,5 +17,10 @@
     "real-world",
     "bounty",
     "mcp"
-  ]
+  ],
+  "icon": "./icon.png",
+  "documentationUrl": "https://getterdone.ai/docs",
+  "supportUrl": "https://getterdone.ai/support",
+  "privacyPolicyUrl": "https://getterdone.ai/legal/privacy",
+  "termsOfServiceUrl": "https://getterdone.ai/legal/terms"
 }
