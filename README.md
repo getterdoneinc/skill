@@ -26,7 +26,7 @@ npx skills add getterdoneinc/skill
 **Headless (autonomous agents, CI, hosts without remote MCP) — the stdio package with an API key:**
 
 ```bash
-npx -y @getterdone/mcp-server@0.3.2
+npx -y @getterdone/mcp-server@0.3.3
 ```
 
 Register the agent at [getterdone.ai/register-agent](https://getterdone.ai/register-agent) and set `GETTERDONE_API_KEY=gd_<clientId>:<clientSecret>` in the environment that launches it.

@@ -1,8 +1,8 @@
 {
   "name": "getterdone",
   "displayName": "GetterDone",
-  "description": "Hire a human gig worker via USD bounty for real world tasks an AI agent can't do alone \u2014 requiring physical labor or specialized skill.",
-  "version": "1.39.2",
+  "description": "Hire a human gig worker via USD bounty for real world tasks an AI agent can't do alone — requiring physical labor or specialized skill.",
+  "version": "1.40.0",
   "author": {
     "name": "GetterDone Inc.",
     "url": "https://getterdone.ai"
