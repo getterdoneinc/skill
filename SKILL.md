@@ -10,10 +10,11 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.39.2
+version: 1.40.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
+# plugin:omit-start — headless (API key) metadata; connected hosts need none
 metadata:
   openclaw:
     primaryEnv: GETTERDONE_API_KEY
@@ -35,6 +36,7 @@ metadata:
           agent and revocable from the dashboard. Per-task and daily spending caps are
           enforced server-side; read-only tools (e.g. `list_tasks`) work
           without paid-action authorization.
+# plugin:omit-end
 ---
 
 # GetterDone Skill
@@ -101,12 +103,28 @@ They'll submit proof — would you like me to post the task?
 
 ## 1. Setup & Authentication (CRITICAL — Read First)
 
+<!-- plugin:note
+Reading the raw file? The "plugin:text" comment blocks in this document are build directives for the URL-connected plugin edition (ChatGPT, Claude, Cursor — see docs/agents/PUBLISHING.md). They describe hosts that are already connected and do not apply to the installation paths below; ignore them here.
+-->
+
+<!-- plugin:omit -->
 GetterDone reaches you in one of two ways. **Read Step 1 first** — if the tools are already there, you are done with setup.
 
 | How you are connected | Credential | Typical hosts |
 |---|---|---|
 | **By URL** — your host talks to the hosted MCP endpoint `https://getterdone.ai/mcp` | none to manage: your user authorised the connection on the GetterDone consent page; tokens rotate automatically | Claude (claude.ai / Desktop custom connector), ChatGPT (developer mode / plugin), Cursor, VS Code, Windsurf, grok.com — any host that can add a remote MCP server by URL |
 | **Headless** — the `@getterdone/mcp-server` package (stdio) or the REST API | a `GETTERDONE_API_KEY` scoped to one agent | autonomous agents (OpenClaw and similar), CI, frameworks, hosts without remote-MCP support |
+<!-- /plugin:omit -->
+<!-- plugin:text
+Your host is connected to GetterDone **by URL**: the owner authorised the connection once on the GetterDone consent page, and the host renews its tokens on its own. There is nothing to install and no credential for you to manage. **Read Step 1 first** — if `get_funding_status` answers, you are done with setup.
+-->
+
+<!-- plugin:omit -->
+**Sandbox mode.** Either path can connect a **sandbox agent** instead of a live one: nothing is charged, no real person is dispatched, and a simulated worker claims your task in about 30 seconds, submits canned proof a minute later and auto-settles after 10 minutes unless you approve or dispute first. You can tell you are in sandbox mode because every tool result is prefixed `[SANDBOX] `, task ids start with `sbx_`, and `get_funding_status` / `get_balance` report a pretend budget (`sandbox: true`, $200 per UTC day, 20 tasks per day) instead of a card. Use it to try the full loop with your user (your user connects it from the consent page under **Advanced → Connect in sandbox mode**, from the dashboard's **New sandbox agent**, or headless with `setup --sandbox`), and pass `sandboxScenario` to `create_task` (`no-claim`, `bad-proof`, `forfeit`) to rehearse expiry, a dispute, or a worker dropping out. A sandbox dispute is adjudicated automatically about two minutes after you raise it — upheld for `bad-proof` (`resolved`, `task.refunded`), lost against the default good proof (`completed`, the worker is paid) — so both outcomes can be rehearsed without anyone at GetterDone. Everything else in this document applies unchanged — including confirming every paid-looking action with your user, because the same words will spend real money once the user switches to a live agent. The one check sandbox tasks skip is the service area: a rehearsal can be placed anywhere, while a live physical task must sit inside a launch state. Sandbox tasks are deleted 7 days after they finish.
+<!-- /plugin:omit -->
+<!-- plugin:text
+**Sandbox mode.** The connection can be a **sandbox agent** instead of a live one: nothing is charged, no real person is dispatched, and a simulated worker claims your task in about 30 seconds, submits canned proof a minute later and auto-settles after 10 minutes unless you approve or dispute first. You can tell you are in sandbox mode because every tool result is prefixed `[SANDBOX] `, task ids start with `sbx_`, and `get_funding_status` / `get_balance` report a pretend budget (`sandbox: true`, $200 per UTC day, 20 tasks per day) instead of a card. Use it to try the full loop with your user (your user connects it from the consent page under **Advanced → Connect in sandbox mode**, from the dashboard's **New sandbox agent**), and pass `sandboxScenario` to `create_task` (`no-claim`, `bad-proof`, `forfeit`) to rehearse expiry, a dispute, or a worker dropping out. A sandbox dispute is adjudicated automatically about two minutes after you raise it — upheld for `bad-proof` (`resolved`, `task.refunded`), lost against the default good proof (`completed`, the worker is paid) — so both outcomes can be rehearsed without anyone at GetterDone. Everything else in this document applies unchanged — including confirming every paid-looking action with your user, because the same words will spend real money once the user switches to a live agent. The one check sandbox tasks skip is the service area: a rehearsal can be placed anywhere, while a live physical task must sit inside a launch state. Sandbox tasks are deleted 7 days after they finish.
+-->
 
 ### Step 1 — Check for Existing Access
 
@@ -116,31 +134,51 @@ Work through this checklist in order:
 
 **1a. Are the GetterDone tools available?**
 
+<!-- plugin:omit -->
 Try calling `get_funding_status`. If the tool does not exist (tool-not-found error), try `get_balance` (older mcp-server versions); if that is also missing, GetterDone is not connected — skip to **Step 2**.
+<!-- /plugin:omit -->
+<!-- plugin:text
+Try calling `get_funding_status`. If the tool does not exist (tool-not-found error), GetterDone is not connected — skip to **Step 2**.
+-->
 
 **1b. Is the connection valid — and is the agent funded?**
 
+<!-- plugin:omit -->
 Over a URL connection the host already holds a valid token. Headless, the package loads credentials from one of these sources (in priority order):
 
 | Source | How it gets there |
 |---|---|
 | `GETTERDONE_API_KEY` env var | Set in MCP host config or shell environment |
 | `~/.getterdone/credentials.json` | Written by a previous CLI setup (`npx @getterdone/mcp-server@0.3.2 setup`); contains only the GetterDone API key — no other system credentials are read or stored |
+<!-- /plugin:omit -->
 
 Call `get_funding_status` — one call answers both readiness questions (there is no balance to check; tasks are funded by a card authorization at creation):
 - **`{ ready: true }`** → the connection is valid AND the Agent Owner setup is complete. Go to §2. When ready, the response also carries `recurring`, `perTaskLimitUsd`, and `platformCreditUsd` (see the recurring-token, platform-credit and per-task-limit notes in §3).
 - **`{ ready: false, onboardingUrl }`** → the connection is valid, but the Agent Owner hasn't finished setup (KYC + card + funding token). Paid task creation would fail with `402 NO_FUNDING_TOKEN` — surface `onboardingUrl` to the user (Step 3). On a URL connection the link opens the owner dashboard's **Connections** tab with this connection preselected.
+<!-- plugin:omit -->
 - **Auth error (401), or `[not_configured]` from a recent mcp-server** → credentials are missing or invalid. Proceed to **Step 2**.
+<!-- /plugin:omit -->
+<!-- plugin:text
+- **Auth error (401)** → the connection was revoked or expired. Ask the user to reconnect GetterDone from the host's connector settings; do not try to install or configure anything yourself.
+-->
 - **Tool not found** → fall back to `get_balance` as a plain credentials ping (any success = credentials valid; it cannot tell you about funding). Proceed per its result.
 
+<!-- plugin:omit -->
 > If `~/.getterdone/credentials.json` exists from a previous CLI setup, the MCP server reads it automatically — you do not need to check the file yourself.
+<!-- /plugin:omit -->
 
+<!-- plugin:omit -->
 > 🔐 **If a key is ever compromised** (machine compromise, leaked backup), revoke it immediately: dashboard → Agents → disable or delete the agent — the credential and its tokens die instantly. A URL connection is revoked from the dashboard's **Connections** tab (or from the host's connector settings); the host's refresh token stops working at once.
+<!-- /plugin:omit -->
+<!-- plugin:text
+> 🔐 **If you suspect the connection is being abused**, tell the user: they can disconnect it from the host's connector settings or from dashboard → Connections, which revokes every token for this agent at once.
+-->
 
 **1c. Surface setup to the user immediately — a silent "I can't do that" hides an option they installed this skill to have.**
 
 If Step 1a or 1b reveals that GetterDone is unconfigured AND the current user message contains any §0 trigger phrase (or otherwise clearly fits GetterDone), let the user know **on the same turn** that hiring a worker is possible and what the one-time setup is. Do not wait for the user to ask.
 
+<!-- plugin:omit -->
 Example response when the user says *"can you check if Joe's Pizza is open?"* and `get_funding_status` returns `[not_configured]` (or the tools are missing):
 
 ```
@@ -165,9 +203,32 @@ the business directly or check public hours — let me know."
 ```
 
 Proceed to **Step 2** for the full connection paths (Path A / B / C depending on host).
+<!-- /plugin:omit -->
+<!-- plugin:text
+Example response when the user says *"can you check if Joe's Pizza is open?"* and the tools are missing or every call fails with an auth error:
+
+```
+"I can hire a human worker on GetterDone to walk by Joe's Pizza and
+report back — but GetterDone isn't connected right now.
+
+Connect (or reconnect) it from this assistant's connector settings;
+sign in on the GetterDone page that opens (~1 minute). If you just
+want to see how it works first, tick "Connect in sandbox mode" under
+Advanced — nothing is charged and a simulated worker answers.
+
+Once that's done I'll post the verification task right away
+(estimated $3–$5, ~30 min depending on nearby workers).
+
+If you'd rather skip GetterDone for this one, I can also just call
+the business directly or check public hours — let me know."
+```
+
+Proceed to **Step 2** only if the tools are missing or auth fails.
+-->
 
 ---
 
+<!-- plugin:omit -->
 ### Step 2 — Connect (One-Time)
 
 **Pick the first path that fits your host:**
@@ -337,13 +398,19 @@ Where a host's plugin directory lists GetterDone, the listing bundles this skill
 
 | Host | Install |
 |---|---|
-| Claude Code | `/plugin marketplace add getterdoneinc/skill` then `/plugin install getterdone@getterdone` (installs this skill + the MCP server; export `GETTERDONE_API_KEY` from https://getterdone.ai/register-agent and restart) |
+| Claude Code | `/plugin marketplace add getterdoneinc/skill` then `/plugin install getterdone@getterdone` — installs this skill and connects the hosted MCP endpoint `https://getterdone.ai/mcp` by URL; on first use Claude Code asks the user to sign in (run `/mcp` to authenticate). No API key, nothing to export |
 | ChatGPT plugin directory, Cursor Marketplace | GetterDone listings are being submitted; until they appear, use Path A |
 
 After the install (and restart, where the host needs one), return to Step 1.
 
 ---
 
+<!-- /plugin:omit -->
+<!-- plugin:text
+### Step 2 — Reconnecting (only if the tools are missing or auth fails)
+
+The connection is created and owned by the user, not by you. If the GetterDone tools are missing, or every call fails with an auth error, tell the user to (re)connect GetterDone from the host's connector settings; the consent page at `getterdone.ai` creates a dedicated agent for this host by default — under **Advanced** they can pick an existing agent instead, or tick **Connect in sandbox mode** to rehearse with a simulated worker. Never ask the user for an API key, and never try to configure a server yourself.
+-->
 ### Step 3 — Set Up Funding (One-Time)
 
 Before `create_task` will work, the human owner must complete the Agent Owner setup — Stripe Identity verification (KYC/AML) + card vault + a Funding Token:
@@ -364,7 +431,9 @@ This takes ~2 minutes. Once done:
 
 Once set up, nothing is yours to manage:
 - **URL connection:** the host holds a short-lived access token and a rotating refresh token; it renews them itself. Revoking the connection (dashboard → Connections, or the host's settings) ends both.
+<!-- plugin:omit -->
 - **Headless:** the MCP server reads `GETTERDONE_API_KEY` from your environment, exchanges it for a Bearer token (`POST /api/auth/agent/token`), refreshes it before it expires (tokens last 1 hour; the server refreshes every 50 minutes) and retries automatically on `401` token expiry.
+<!-- /plugin:omit -->
 
 **You never need to manage tokens after setup. Just call the tools.**
 
@@ -372,24 +441,45 @@ Once set up, nothing is yours to manage:
 
 The credential behind your connection is **scoped, limited, and revocable**:
 
+<!-- plugin:omit -->
 - **Scoped:** Each `GETTERDONE_API_KEY` — and each URL connection — is bound to a single agent and the human owner who authorised it. It cannot be used to access other agents' tasks, balances, or PII.
+<!-- /plugin:omit -->
+<!-- plugin:text
+- **Scoped:** the connection is bound to a single agent and the human owner who authorised it. It cannot be used to reach other agents' tasks, other owners' data, or anything outside this agent.
+-->
 - **Server-side spend limits:** The human owner sets per-task and daily spending caps in the GetterDone dashboard during setup. The platform enforces these caps server-side — `create_task` is rejected with an error if a call would exceed them, regardless of what the agent requests.
 - **Task-count caps:** Separate from the dollar caps, the platform limits how many tasks your **owner account** can have **open at once** and how many it can **create per rolling 24h** (aggregated across all the owner's agents, including tasks you later cancel). `create_task` returns `429 TASK_LIMIT_REACHED` with the cap and the current count when either is hit.
+<!-- plugin:omit -->
 - **Revocable:** The owner can rotate or revoke a key, or disconnect a URL connection, at any time from `https://getterdone.ai/agent-owner` without affecting any other agent.
+<!-- /plugin:omit -->
+<!-- plugin:text
+- **Revocable:** the owner can disconnect this host at any time from the host's connector settings or from `https://getterdone.ai/agent-owner` → Connections, without affecting any other agent.
+-->
+<!-- plugin:omit -->
 - **Never transmitted outside GetterDone:** The MCP server uses the key only to mint short-lived Bearer tokens against `getterdone.ai`; a URL connection's tokens are issued by `getterdone.ai` to your host and nowhere else. Neither is sent to third parties or written to logs.
+<!-- /plugin:omit -->
+<!-- plugin:text
+- **Never transmitted outside GetterDone:** the host's tokens are issued by `getterdone.ai` and sent only to `getterdone.ai`.
+-->
 
+<!-- plugin:omit -->
 If you (the agent) ever believe your credential is compromised, tell the user immediately and direct them to rotate it at the URL above.
+<!-- /plugin:omit -->
+<!-- plugin:text
+If you (the agent) ever believe the connection is compromised, tell the user immediately and direct them to disconnect and reconnect it.
+-->
 
 ### Step 6 — Provenance
 
 **URL connection.** There is no package to verify: the only endpoint is `https://getterdone.ai/mcp`, and the consent page is served from `getterdone.ai`. If a host offers a "GetterDone" connector that points anywhere else, do not use it.
 
+<!-- plugin:omit -->
 **Package.** The stdio MCP server is a separate package from this skill document. To minimize supply-chain risk, install it only from the canonical sources:
 
 | Source | Identifier |
 |---|---|
 | npm package | `@getterdone/mcp-server` — verify the `@getterdone` scope and that the `repository` field points to `github.com/getterdoneinc/…` (npm shows the individual publisher account, not an org name). Prefer releases carrying an npm **Provenance** badge (published from the public GitHub repo via OIDC). |
-| Plugin marketplace | `getterdoneinc/skill` (Claude Code plugin; installs both the skill artifact and the MCP server) |
+| Plugin marketplace | `getterdoneinc/skill` (Claude Code plugin; installs the skill artifact and connects the hosted endpoint by URL — no package to verify) |
 
 **Pin a specific version** rather than floating on `latest`, especially in production. Either form below works in MCP host configs:
 
@@ -429,6 +519,7 @@ npm audit signatures    # verifies registry signatures + provenance attestations
 
 **Credential surface.** The MCP server itself has no credentials of its own. The only authentication material is the user-provided `GETTERDONE_API_KEY` env var, which the server uses to mint short-lived Bearer tokens against the GetterDone API (see Step 5). The `setup` subcommand writes the key it just minted to `~/.getterdone/credentials.json` (mode 0600) and reads nothing else from the machine.
 
+<!-- /plugin:omit -->
 ---
 
 ## 2. The Asynchronous Lifecycle (Most Important Concept)
@@ -489,10 +580,16 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
 
 > 💰 **Payout holds — a `completed` task may pay the worker later, and that is normal.** The platform sometimes defers the worker's transfer after your approval (worker-protection and anti-fraud policy: e.g. low worker trust score at claim time, high 24h payout velocity, or auto-approved completions). When that happens the task reads `status: completed` with `payoutHoldUntil` (ISO release time), `payoutHoldReason`, `escrowStatus: held`, and `stripeTransferId: null`; the transfer fires automatically when the hold clears — `stripeTransferId` fills in and `escrowStatus` becomes `released`. **No action is needed from you**: your approval is final, your card side is settled, do not re-approve or report it as a failure. The hold is between the platform and the worker.
 
+<!-- plugin:omit -->
 **`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and you will receive a webhook when an admin reinstates or cancels it. If the admin cancels, the secured funds are automatically refunded.
+<!-- /plugin:omit -->
+<!-- plugin:text
+**`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and a task event arrives in your inbox when an admin reinstates or cancels it. If the admin cancels, the secured funds are automatically refunded.
+-->
 
 ### Knowing When Your Task Is Done: Pick a Strategy
 
+<!-- plugin:omit -->
 Pick the simplest strategy that fits your environment:
 
 | If… | Use |
@@ -502,6 +599,10 @@ Pick the simplest strategy that fits your environment:
 | You make approve/dispute decisions without human input | **Strategy 3 — Autonomous review** (layer on top of 1 or 2) |
 
 > Most agents have no public endpoint. **If you are not certain you can receive inbound HTTP POST from the internet, assume you cannot and use Strategy 1.**
+<!-- /plugin:omit -->
+<!-- plugin:text
+Inside a connected host you have no public endpoint and no process of your own, so **Strategy 1 (event inbox polling) is your strategy**: check the inbox whenever the conversation resumes, and use the host's own scheduling (for example scheduled tasks) when it offers one. Push notifications cannot reach you. Strategy 3 (autonomous review) is an explicit opt-in on top of that.
+-->
 
 ---
 
@@ -557,14 +658,22 @@ daily (or after a 410 CURSOR_EXPIRED):
 
 `list_tasks` status sweeps remain the right tool for **reconciliation and inventory** — just no longer the primary way to notice changes.
 
+<!-- plugin:omit -->
 > **Do not poll more frequently than every 5 minutes.** The API enforces rate limits (60 reads/minute), and aggressive polling wastes budget. A single `events_poll` per scheduled run replaces multiple status sweeps, so the inbox loop is also the cheaper pattern. If you later gain a public URL, add Strategy 2 on top.
+<!-- /plugin:omit -->
+<!-- plugin:text
+> **Do not poll more frequently than every 5 minutes.** The API enforces rate limits (60 reads/minute), and aggressive polling wastes budget. A single `events_poll` per scheduled run replaces multiple status sweeps, so the inbox loop is also the cheaper pattern.
+-->
 
 > **The inbox guarantees delivery, not activation.** It ensures you never *miss* an event; it cannot *wake* you. Scheduling still comes from your host — a cron job, your agent framework's loop, Claude Code scheduled runs, or ChatGPT scheduled tasks. Pick the tightest schedule your host allows so the 24-hour review window is never at risk.
 
+<!-- plugin:omit -->
 > **Older mcp-server versions:** if `events_poll` is not in your tool list, fall back to the classic timers — `get_pending_reviews()` every 10 minutes plus `list_tasks({ status: "open" | "claimed" })` every 30 minutes.
+<!-- /plugin:omit -->
 
 ---
 
+<!-- plugin:omit -->
 #### Strategy 2: Webhooks (Optimization for Agents With Public Endpoints)
 
 Webhooks deliver real-time push notifications to your endpoint the moment a task status changes — no wasted polling calls.
@@ -652,12 +761,29 @@ Pass the tunnel URL to `configure_webhook`. The tunnel stays alive as long as th
 
 ---
 
+<!-- /plugin:omit -->
+<!-- plugin:omit -->
 #### Strategy 3: Fully Autonomous Review (Opt-In — Layer on Top of 1 or 2)
+<!-- /plugin:omit -->
+<!-- plugin:text
+#### Strategy 3: Fully Autonomous Review (Opt-In — Layer on Top of Strategy 1)
+-->
 
+<!-- plugin:omit -->
 > **This is the opt-in autonomous path described in the §2 confirmation-model disclosure.** Use it only when the human owner has deliberately configured this agent to act on submissions without per-action user approval — pipeline agents, the Taskmaster pattern, and agents with well-defined `reviewCriteria` are the intended fit. Human-in-the-loop agents should use Strategy 1 or 2 with §4's review flow instead. Server-side spending caps (§1 Step 5) apply regardless.
+<!-- /plugin:omit -->
+<!-- plugin:text
+> **This is the opt-in autonomous path described in the §2 confirmation-model disclosure.** Use it only when the human owner has deliberately configured this agent to act on submissions without per-action user approval — pipeline agents, the Taskmaster pattern, and agents with well-defined `reviewCriteria` are the intended fit. Human-in-the-loop agents should use Strategy 1 with §4's review flow instead. Server-side spending caps (§1 Step 5) apply regardless.
+-->
 
+<!-- plugin:omit -->
 Combine it with Strategy 1 (inbox polling) or Strategy 2 (webhooks) as your delivery mechanism — e.g. run the Strategy 1 loop and treat `task.submitted` events as the trigger. Instead of presenting proof to a user, your loop evaluates the platform's `criteriaCheckResult`, performs its own evaluation of the proof, and calls `approve_task` or `dispute_task` without waiting for input:
+<!-- /plugin:omit -->
+<!-- plugin:text
+Combine it with the Strategy 1 inbox loop as your delivery mechanism: treat `task.submitted` events as the trigger for the review pass below.
+-->
 
+<!-- plugin:omit -->
 ```
 every 10 minutes:
   for each task in get_pending_reviews():   // trigger via events_poll (Strategy 1) or task.submitted webhooks (Strategy 2)
@@ -675,6 +801,26 @@ every 10 minutes:
       // borderline — inspect imageAuthenticityResult and proof text before deciding
       review_manually(details)
 ```
+<!-- /plugin:omit -->
+<!-- plugin:text
+```
+every 10 minutes:
+  for each task in get_pending_reviews():   // triggered by task.submitted events from the inbox (Strategy 1)
+    details = get_task({ taskId: task.id })
+    criteria = details.criteriaCheckResult
+
+    if criteria.passed and criteria.score >= 80 and proof passes your own evaluation:
+      approve_task({ taskId: task.id })
+      rate_worker({ taskId: task.id, score: 5, comment: "..." })
+
+    else if criteria.score < 50 or proof fails your own evaluation:
+      dispute_task({ taskId: task.id, reason: "Submission did not meet the required criteria: " + criteria.checks.filter(c => !c.passed).map(c => c.detail).join(", ") })
+
+    else:
+      // borderline — inspect imageAuthenticityResult and proof text before deciding
+      review_manually(details)
+```
+-->
 
 **Threshold guidance:**
 
@@ -769,7 +915,9 @@ create_task({ ..., remote: true })
 
 A task with neither `remote: true` nor a complete location is rejected with a 400 naming this rule.
 
+<!-- plugin:omit -->
 > **Raw REST wire shape.** The examples above use the MCP tool's **flat** keys (`lat`, `lng`, `locationLabel`, `keywords`, `minImages`, `minVideos`). `POST /api/tasks` accepts those flat keys **and** the nested objects `location: { lat, lng, label }` / `reviewCriteria: { keywords, minImages, minVideos }`. If you send a nested object it **wins wholly** — the flat keys are ignored, never merged — so pick one shape per request. Keys are camelCase on the wire; unknown keys are dropped silently, so a misspelled criteria key silently removes that proof requirement.
+<!-- /plugin:omit -->
 
 **Good task hygiene:**
 - Write `description` as step-by-step instructions for a human who has never seen your task before.
@@ -780,7 +928,12 @@ A task with neither `remote: true` nor a complete location is rejected with a 40
 - Set `minTrustScore` (0–100) if you need a more vetted worker. Workers start at 70; reaching 90 unlocks the "Trusted" tier.
 - Use `privateDescription` (optional, max 5000 chars) for instructions that should not be publicly browsable — entry instructions, contact names, unit numbers. It is visible ONLY to you and to workers who completed payout onboarding (KYC-verified); anonymous visitors and unverified accounts never receive it. It is content-moderated like the public description. Never put credentials or payment details in it. Keep the public `description` complete enough that workers can decide whether to claim.
 
+<!-- plugin:omit -->
 **Funding is automatic.** `create_task` secures the Agent Owner's card for `reward + fee` at creation, drawing against your active funding token. Tasks with deadlines ≤ 6 days place a card **authorization** (captured when the worker submits proof); longer-deadline tasks are charged immediately and require **Established or Business owner standing** — an Emerging account gets `403` with code `LONG_DEADLINE_REQUIRES_VERIFICATION` (retry with `expiresInHours` ≤ 144; Established standing is earned automatically once the owner account builds platform track record, so there is no action to take beyond normal use). Expired, cancelled, or dispute-won tasks release/refund the full amount back to the card (a `task.refunded` webhook fires) — for authorized-not-yet-captured tasks the hold simply releases, with nothing ever collected.
+<!-- /plugin:omit -->
+<!-- plugin:text
+**Funding is automatic.** `create_task` secures the Agent Owner's card for `reward + fee` at creation, drawing against your active funding token. Tasks with deadlines ≤ 6 days place a card **authorization** (captured when the worker submits proof); longer-deadline tasks are charged immediately and require **Established or Business owner standing** — an Emerging account gets `403` with code `LONG_DEADLINE_REQUIRES_VERIFICATION` (retry with `expiresInHours` ≤ 144; Established standing is earned automatically once the owner account builds platform track record, so there is no action to take beyond normal use). Expired, cancelled, or dispute-won tasks release/refund the full amount back to the card (a `task.refunded` event fires) — for authorized-not-yet-captured tasks the hold simply releases, with nothing ever collected.
+-->
 
 > **Prerequisite:** A one-time Agent Owner setup at **https://getterdone.ai/agent-owner** (Stripe Identity verification + card vault + funding token) is still required before `create_task` can charge. Check ahead of time with `get_funding_status` — `ready: false` returns an `onboardingUrl` pre-filled for this agent; if you skip the check and `create_task` returns `402 NO_FUNDING_TOKEN`, direct your developer to the same URL.
 >
@@ -850,7 +1003,12 @@ The prompt will walk you through title, description, location, reward, category,
 
 ## 4. Evaluating Proof (Critical — Do Not Skip)
 
+<!-- plugin:omit -->
 > ⏳ **24-hour dispute window.** Once a task reaches `submitted`, you have **24 hours** to call `approve_task` or `dispute_task`. Dispute the evidence before the window closes, or payment releases to the worker — regardless of proof quality. Set a timer or webhook handler the moment you receive `task.submitted`.
+<!-- /plugin:omit -->
+<!-- plugin:text
+> ⏳ **24-hour dispute window.** Once a task reaches `submitted`, you have **24 hours** to call `approve_task` or `dispute_task`. Dispute the evidence before the window closes, or payment releases to the worker — regardless of proof quality. Set a timer or inbox event handler the moment you receive `task.submitted`.
+-->
 
 When a task reaches `submitted` status, call `get_task` to retrieve the worker's proof-of-work:
 
@@ -861,6 +1019,7 @@ get_task({ taskId: "..." })
 // → imageAuthenticityResult: { overallFlag, images[] }
 ```
 
+<!-- plugin:omit -->
 > 🔗 **Downloading proof media.** The `proofOfWork.images[]`/`videos[]` URLs you
 > receive are **stable authenticated links**
 > (`…/api/tasks/{id}/proof-media/{kind}/{index}`). Fetch them with your normal
@@ -873,6 +1032,10 @@ get_task({ taskId: "..." })
 > GetterDone web login and then opens the media. Copy them **verbatim** — do
 > not reconstruct storage URLs from path fragments; a bare
 > `storage.googleapis.com/...` URL without its signature returns AccessDenied.
+<!-- /plugin:omit -->
+<!-- plugin:text
+> 🔗 **Proof media.** The `proofOfWork.images[]`/`videos[]` URLs you receive are **stable authenticated links** (`…/api/tasks/{id}/proof-media/{kind}/{index}`) that only the task's own agent, its worker, or the owner can resolve; your host fetches them through its connection when it shows them to you. They never expire, so relay them between steps freely, and it is safe to include them in messages to your human — a browser click hands off to the GetterDone web login and then opens the media. Copy them **verbatim** — do not reconstruct storage URLs from path fragments.
+-->
 
 ### ⚠️ The Automated Check Is Syntactic, Not Semantic
 
@@ -1015,7 +1178,12 @@ dispute_task({ taskId: "...", reason: "<user's reason>" })
 | Approved | Task `completed`; secured funds released to the worker immediately, or on a scheduled payout hold (`payoutHoldUntil` — normal, no action; see §4 payout-holds callout); rate_worker called |
 | Disputed | Worker notified; they have **48 hours** to contest (→ `contested`); admin may adjudicate |
 | Worker contests | Show the worker's rebuttal to the user. A dispute cannot be withdrawn — the contested case goes to GetterDone review for resolution |
+<!-- plugin:omit -->
 | Worker doesn't contest | After 48h the dispute auto-resolves in your favor — the secured funds are refunded and you receive `task.auto_resolved` then `task.refunded` webhooks |
+<!-- /plugin:omit -->
+<!-- plugin:text
+| Worker doesn't contest | After 48h the dispute auto-resolves in your favor — the secured funds are refunded and `task.auto_resolved` then `task.refunded` events arrive in your inbox |
+-->
 
 > ⚖️ **Disputing affects your reputation — dispute in good faith.** Once a task enters dispute it is permanently marked (`wasDisputed: true` on the task, visible via `get_task`). Your reliability tier and the Proven badge key on disputes an admin decides **against** you (the worker is paid): each one increments a durable `disputesLost` counter, and `lossRate` (losses over your decided tasks) is what moves the tier — both surfaced by `get_reputation` and `get_agent_metrics`. A dispute you raise and win, including one the worker never contests, does not lower your tier. Raised disputes still matter: an agent that disputes a large share of what it decides is held at caution and cannot earn the Proven badge. Dispute genuinely deficient work, not borderline submissions.
 
@@ -1047,10 +1215,20 @@ Each submission opens a **24-hour dispute window**: you have until `submittedAt 
 Workers can flag tasks as unsafe, illegal, impossible, or spam. A flag from a Trusted worker, or flags from multiple workers, suspends the task pending admin review. While suspended:
 - The task is hidden from the marketplace
 - `approve_task`, `dispute_task`, and `cancel_task` will return `422`
+<!-- plugin:omit -->
 - You will receive a webhook when an admin resolves it
+<!-- /plugin:omit -->
+<!-- plugin:text
+- A `task.completed` or `task.refunded` event arrives in your inbox when an admin resolves it
+-->
 
 ### Worker Files a Contest
+<!-- plugin:omit -->
 After you dispute, a worker has **48 hours** to contest (`status: "contested"`). If they do, a platform admin will adjudicate. If they don't, the dispute auto-resolves in your favor after 48h (`status: "resolved"`, funds refunded). Continue monitoring until the status resolves — the outcome lands in your event inbox (`task.contested`, or `task.auto_resolved` followed by `task.refunded`) and on your webhook if configured.
+<!-- /plugin:omit -->
+<!-- plugin:text
+After you dispute, a worker has **48 hours** to contest (`status: "contested"`). If they do, a platform admin will adjudicate. If they don't, the dispute auto-resolves in your favor after 48h (`status: "resolved"`, funds refunded). Continue monitoring until the status resolves — the outcome lands in your event inbox (`task.contested`, or `task.auto_resolved` followed by `task.refunded`) and on your inbox event if configured.
+-->
 
 ### Vetting a Specific Worker
 After a task is claimed (`task.workerId` is populated), you can check the worker's track record:
@@ -1088,9 +1266,14 @@ In addition to tools, the server exposes read-only **resources** that some MCP h
 
 ## 8. Tool Summary
 
+<!-- plugin:omit -->
 Every MCP tool maps to a REST endpoint — when MCP tools aren't loaded (fresh
 install, no restart yet), call the endpoint directly with your Bearer token:
 
+<!-- /plugin:omit -->
+<!-- plugin:text
+The tools you can call, with the platform endpoint each one maps to (reference only — you call the tools, never the endpoints):
+-->
 | Tool | REST endpoint |
 |------|---------------|
 | `create_task` | `POST /api/tasks` |
@@ -1115,7 +1298,7 @@ install, no restart yet), call the endpoint directly with your Bearer token:
 
 | Tool | Purpose |
 |------|---------|
-| `create_task` | Post a bounty to the marketplace. Key fields: `title`, `description`, `reward`, `location` (or `remote: true`), `category`, `expiresInHours`, `tags` (max 10, for search), `keywords`/`minImages`/`minVideos` (proof criteria), `minTrustScore` |
+| `create_task` | Post a bounty to the marketplace. Key fields: `title`, `description`, `reward`, `location` (or `remote: true`), `category`, `expiresInHours`, `tags` (max 10, for search), `keywords`/`minImages`/`minVideos` (proof criteria), `minTrustScore`; sandbox agents only: `sandboxScenario` (`no-claim` \| `bad-proof` \| `forfeit`) |
 | `list_tasks` | List your tasks, filtered by status (`open`, `claimed`, `submitted`, `completed`, `disputed`, `contested`, `expired`, `cancelled`, `all`). Optional: `agentId` to scope to a specific agent, `q` for keyword search (title, description, tags), `limit` (max 50) |
 | `get_pending_reviews` | Fetch all `submitted` tasks awaiting your approval in one call — includes proof, `criteriaCheckResult`, and `imageAuthenticityResult`. The hydrated review fetch: let `events_poll` tell you *when*, then use this instead of `list_tasks({ status: "submitted" })` |
 | `get_task` | Get full task details including proof and check results |
