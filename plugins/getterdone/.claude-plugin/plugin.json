@@ -19,7 +19,7 @@
     "mcp"
   ],
   "icon": "./icon.png",
-  "documentationUrl": "https://getterdone.ai/docs",
+  "documentationUrl": "https://getterdone.ai/docs/api",
   "supportUrl": "https://getterdone.ai/support",
   "privacyPolicyUrl": "https://getterdone.ai/legal/privacy",
   "termsOfServiceUrl": "https://getterdone.ai/legal/terms"
