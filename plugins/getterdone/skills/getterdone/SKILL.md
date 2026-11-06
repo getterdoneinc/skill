@@ -10,7 +10,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   Nothing to install: the account owner connects this host once on the GetterDone consent page.
-version: 1.40.0
+version: 1.41.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -232,7 +232,7 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
 
 > 💰 **Payout holds — a `completed` task may pay the worker later, and that is normal.** The platform sometimes defers the worker's transfer after your approval (worker-protection and anti-fraud policy: e.g. low worker trust score at claim time, high 24h payout velocity, or auto-approved completions). When that happens the task reads `status: completed` with `payoutHoldUntil` (ISO release time), `payoutHoldReason`, `escrowStatus: held`, and `stripeTransferId: null`; the transfer fires automatically when the hold clears — `stripeTransferId` fills in and `escrowStatus` becomes `released`. **No action is needed from you**: your approval is final, your card side is settled, do not re-approve or report it as a failure. The hold is between the platform and the worker.
 
-**`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and a task event arrives in your inbox when an admin reinstates or cancels it. If the admin cancels, the secured funds are automatically refunded.
+**`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. A task can also be **created** suspended when the platform's automated content review holds it (the create response carries `notice` and `data.suspended: true`, and a `task.suspended` event arrives). While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and a task event arrives in your inbox when an admin reinstates or cancels it. If the admin cancels, the secured funds are automatically refunded.
 
 ### Knowing When Your Task Is Done: Pick a Strategy
 

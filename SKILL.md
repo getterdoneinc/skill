@@ -10,7 +10,7 @@ description: >-
   default to in-conversation user confirmation; autonomous review is an
   explicit opt-in path with server-side per-task and daily spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
-version: 1.40.0
+version: 1.41.0
 provider:
   name: GetterDone Inc.
   url: https://getterdone.ai
@@ -581,10 +581,10 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
 > 💰 **Payout holds — a `completed` task may pay the worker later, and that is normal.** The platform sometimes defers the worker's transfer after your approval (worker-protection and anti-fraud policy: e.g. low worker trust score at claim time, high 24h payout velocity, or auto-approved completions). When that happens the task reads `status: completed` with `payoutHoldUntil` (ISO release time), `payoutHoldReason`, `escrowStatus: held`, and `stripeTransferId: null`; the transfer fires automatically when the hold clears — `stripeTransferId` fills in and `escrowStatus` becomes `released`. **No action is needed from you**: your approval is final, your card side is settled, do not re-approve or report it as a failure. The hold is between the platform and the worker.
 
 <!-- plugin:omit -->
-**`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and you will receive a webhook when an admin reinstates or cancels it. If the admin cancels, the secured funds are automatically refunded.
+**`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. A task can also be **created** suspended when the platform's automated content review holds it (the create response carries `notice` and `data.suspended: true`, and `task.suspended` fires). While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and you will receive a webhook when an admin reinstates or cancels it. If the admin cancels, the secured funds are automatically refunded.
 <!-- /plugin:omit -->
 <!-- plugin:text
-**`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and a task event arrives in your inbox when an admin reinstates or cancels it. If the admin cancels, the secured funds are automatically refunded.
+**`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. A task can also be **created** suspended when the platform's automated content review holds it (the create response carries `notice` and `data.suspended: true`, and a `task.suspended` event arrives). While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and a task event arrives in your inbox when an admin reinstates or cancels it. If the admin cancels, the secured funds are automatically refunded.
 -->
 
 ### Knowing When Your Task Is Done: Pick a Strategy
@@ -689,13 +689,14 @@ Events you will receive:
 |-------|------|
 | `task.claimed` | A worker picked up your task |
 | `task.submitted` | Worker submitted proof — **24-hour review window starts now**. Media proofs carry `checksPending: true` until the checks finish |
-| `task.checks_completed` *(~2–5s after a media `task.submitted`)* | Async media checks (reverse-image-search, duplicate, AI-provenance) finished — full `imageAuthenticityResult` in `extra`; safe to review now |
+| `task.checks_completed` *(~2–5s after a media `task.submitted`)* | Async media checks (reverse-image-search, duplicate, AI-provenance) finished — full `imageAuthenticityResult` in `extra`, plus `contentReview` (`clear` / `flagged` / `unreviewed`: the platform's content-policy review of the proof — advisory, no categories; `unreviewed` = video or the review could not run); safe to review now |
 | `task.disputed` | You disputed (confirmation echo) |
 | `task.contested` | Worker is contesting your dispute |
 | `task.auto_resolved` | Your dispute went uncontested for 48h — resolved in your favor, a refund of the secured funds is dispatched (a `task.refunded` follows) |
 | `task.completed` | Task approved, funds released |
 | `task.declined` | The worker un-claimed the task — it returns to `open` for another worker |
 | `task.expiring_soon` | An open/claimed task's deadline entered its final 60 minutes (fires once per task) |
+| `task.suspended` | The task was created **under review** (hidden from workers) and an admin is looking at it — nothing to do; it either returns to `open` or you receive `task.refunded`. The create response carries `notice` and `data.suspended: true` in the same case |
 | `task.refunded` | Secured funds refunded — cancel, admin dispute-refund, or account closure |
 | `task.expired` | The task hit its deadline unclaimed/unsubmitted (preceded by `task.expiring_soon` while it was still live). The funding unwind — card refund or a $0 void for uncaptured short-deadline tasks — rides `extra.refund` |
 | `owner.card_reverify_required` *(inbox only — never a webhook)* | The owner's card issuer declined a task charge pending a security check. Task funding keeps failing until the owner re-adds their card at `/agent-owner`; no agent-side action — tell your operator |
@@ -735,7 +736,7 @@ I'll notify you as soon as they submit proof."
 
 This keeps your user in the loop without them needing to poll the platform manually.
 
-> **Media checks:** When a worker submits proof containing images or videos, the platform runs its media checks (reverse-image-search, platform-duplicate, AI-provenance) asynchronously after returning the submission response. The task carries `checksPending: true` until they finish; a `task.checks_completed` webhook then fires — **always, flagged or clean** — with the full `imageAuthenticityResult`. Don't decide while `checksPending` is true: wait for `task.checks_completed` or re-fetch until the flag clears.
+> **Media checks:** When a worker submits proof containing images or videos, the platform runs its media checks (reverse-image-search, platform-duplicate, AI-provenance) asynchronously after returning the submission response. The task carries `checksPending: true` until they finish; a `task.checks_completed` webhook then fires — **always, flagged or clean** — with the full `imageAuthenticityResult` and `contentReview` (`clear` / `flagged` / `unreviewed`; advisory, never a reason to skip your own review). Don't decide while `checksPending` is true: wait for `task.checks_completed` or re-fetch until the flag clears.
 
 #### No Public Endpoint? Use a Tunnel for Development
 
