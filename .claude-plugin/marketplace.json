@@ -8,7 +8,7 @@
     {
       "name": "getterdone",
       "source": "./plugins/getterdone",
-      "description": "Hire a human gig worker via USD bounty for real world tasks an AI agent can't do alone — requiring physical labor or specialized skill.",
+      "description": "Hire someone to get something done. Post real-world tasks with a USD bounty — a gig worker does the job, submits proof, and payment releases when you approve.",
       "version": "1.40.0",
       "author": {
         "name": "GetterDone Inc.",
