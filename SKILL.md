@@ -8,7 +8,7 @@ description: >-
   submits photo/text proof, you approve and payment settles to the worker.
   Paid actions
   default to in-conversation user confirmation; autonomous review is an
-  explicit opt-in path with server-side per-task and daily spending caps.
+  explicit opt-in path with server-side per-task and rolling-30-day spending caps.
   One-time agent setup at https://getterdone.ai/register-agent.
 version: 1.41.0
 provider:
@@ -33,7 +33,7 @@ metadata:
           ~/.getterdone/credentials.json — that file holds ONLY this
           GetterDone API key (the CLI writes it; nothing here reads SSH keys,
           cloud credentials, or any other system secret). Scoped to a single
-          agent and revocable from the dashboard. Per-task and daily spending caps are
+          agent and revocable from the dashboard. Per-task and rolling-30-day spending caps are
           enforced server-side; read-only tools (e.g. `list_tasks`) work
           without paid-action authorization.
 # plugin:omit-end
@@ -152,7 +152,7 @@ Over a URL connection the host already holds a valid token. Headless, the packag
 | `~/.getterdone/credentials.json` | Written by a previous CLI setup (`npx @getterdone/mcp-server@0.3.3 setup`); contains only the GetterDone API key — no other system credentials are read or stored |
 <!-- /plugin:omit -->
 
-Call `get_funding_status` — one call answers both readiness questions (there is no balance to check; tasks are funded by a card authorization at creation):
+Call `get_funding_status` — one call answers both readiness questions (there is no balance to check; tasks are funded from the owner's card at creation):
 - **`{ ready: true }`** → the connection is valid AND the Agent Owner setup is complete. Go to §2. When ready, the response also carries `recurring`, `perTaskLimitUsd`, and `platformCreditUsd` (see the recurring-token, platform-credit and per-task-limit notes in §3).
 - **`{ ready: false, onboardingUrl }`** → the connection is valid, but the Agent Owner hasn't finished setup (KYC + card + funding token). Paid task creation would fail with `402 NO_FUNDING_TOKEN` — surface `onboardingUrl` to the user (Step 3). On a URL connection the link opens the owner dashboard's **Connections** tab with this connection preselected.
 <!-- plugin:omit -->
@@ -249,7 +249,7 @@ Add **`https://getterdone.ai/mcp`** as a remote MCP server / custom connector. T
 What happens next, automatically:
 
 1. The host discovers GetterDone's OAuth metadata, registers itself, and opens the **GetterDone consent page**.
-2. Your user signs in — or creates an account inline (Google sign-in + a nickname, ~1 minute) — and picks the agent the connection should act as (a new agent named after the host is created for them if they have none).
+2. Your user signs in — or creates an account inline (Google, GitHub or email sign-in + a nickname, ~1 minute) — and picks the agent the connection should act as (a new agent named after the host is created for them if they have none).
 3. The host receives a token scoped to that agent; refreshes are automatic. **There is no API key to copy.**
 
 Then return to **Step 1**: `get_funding_status` answers whether the owner has completed funding (Step 3). Connections made this way must call `quote_task` before `create_task` (§3) so the host can show the exact charge before the write.
@@ -420,12 +420,12 @@ https://getterdone.ai/agent-owner?agentId=<your-agent-id>
 ```
 (`get_funding_status` returns this URL pre-filled as `onboardingUrl` when setup is incomplete; for a URL connection it opens the **Connections** tab with the connection preselected and the fund button ready.)
 
-This takes ~2 minutes. Once done:
-- The platform issues a Funding Token linked to your Agent ID
+This takes ~2 minutes (identity verification is required before the owner can vault a card or issue a token — there is no card-only shortcut). Once done:
+- The platform issues a Funding Token linked to your Agent ID. Every token carries a **per-task cap** (`perTaskLimitUsd`) and is either **single-use** (one task, then the owner issues another) or **recurring** (stays active across tasks). The money model is explained once, in §3 Step A under *Funding is automatic* — read that before your first `create_task`.
 - `create_task` secures the owner's card for reward + fee at creation, against that token.
 - If `create_task` returns `403 LONG_DEADLINE_REQUIRES_VERIFICATION` you have not reached sufficient standing to create tasks with `expiresInHours` > 144. Longer deadlines are limited to **Established or Business owner accounts** (Emerging accounts are limited to 144 h).
 - If `create_task` returns `402 NO_FUNDING_TOKEN`, setup isn't complete yet — send the owner to the link above
-- (`fund_account` is deprecated and now a no-op — it no longer charges; do not call it)
+- Never call `fund_account` — it is a legacy no-op (see §8, *Legacy*).
 
 ### Step 4 — Ongoing Authentication (Fully Automatic)
 
@@ -447,8 +447,8 @@ The credential behind your connection is **scoped, limited, and revocable**:
 <!-- plugin:text
 - **Scoped:** the connection is bound to a single agent and the human owner who authorised it. It cannot be used to reach other agents' tasks, other owners' data, or anything outside this agent.
 -->
-- **Server-side spend limits:** The human owner sets per-task and daily spending caps in the GetterDone dashboard during setup. The platform enforces these caps server-side — `create_task` is rejected with an error if a call would exceed them, regardless of what the agent requests.
-- **Task-count caps:** Separate from the dollar caps, the platform limits how many tasks your **owner account** can have **open at once** and how many it can **create per rolling 24h** (aggregated across all the owner's agents, including tasks you later cancel). `create_task` returns `429 TASK_LIMIT_REACHED` with the cap and the current count when either is hit.
+- **Server-side spend limits:** The human owner sets a per-task cap on each funding token (and chooses single-use or recurring) in the GetterDone dashboard; on top of that the platform enforces a per-task reward ceiling and a rolling-30-day volume cap keyed to the owner's standing tier (§3 Step A). All of these are enforced server-side — `create_task` is rejected with an error if a call would exceed them, regardless of what the agent requests.
+- **Task-count caps:** Separate from the dollar caps, the platform limits how many tasks your **owner account** can have **open at once** and how many it can **create per rolling 24h** (aggregated across all the owner's agents, including tasks you later cancel). `create_task` returns `429 OPEN_TASK_LIMIT` or `TASK_CREATION_LIMIT` with the cap and the current count when either is hit.
 <!-- plugin:omit -->
 - **Revocable:** The owner can rotate or revoke a key, or disconnect a URL connection, at any time from `https://getterdone.ai/agent-owner` without affecting any other agent.
 <!-- /plugin:omit -->
@@ -526,7 +526,7 @@ npm audit signatures    # verifies registry signatures + provenance attestations
 
 Unlike digital API calls that complete in milliseconds, human physical labor takes **real time** — a worker needs to travel to a location, perform the task, and submit photo proof. Expect task completion to take anywhere from **30 minutes to several days**, depending on the task and local worker availability.
 
-> 🔐 **Confirmation model — read before picking a strategy.** Every paid action (`create_task`, `approve_task`, `dispute_task`) **defaults to requiring explicit in-conversation user confirmation** — §3 Step 0 and §4 walk through the prompts you must use. **Strategy 3 (Fully Autonomous Review) below is an explicit opt-in path** intended for agents whose human owner has chosen to run them without per-action approval (e.g. pipeline agents, the Taskmaster pattern). Strategy 3 still operates under the server-side per-task and daily spending caps set at registration (§1 Step 5) and the API enforces those caps regardless of which strategy you use. **If you are unsure which mode you are in, default to human confirmation** — Strategies 1 and 2 keep the user in the loop.
+> 🔐 **Confirmation model — read before picking a strategy.** Every paid action (`create_task`, `approve_task`, `dispute_task`) **defaults to requiring explicit in-conversation user confirmation** — §3 Step 0 and §4 walk through the prompts you must use. **Strategy 3 (Fully Autonomous Review) below is an explicit opt-in path** intended for agents whose human owner has chosen to run them without per-action approval (e.g. pipeline agents, the Taskmaster pattern). Strategy 3 still operates under the server-side per-task cap the owner sets on the funding token (§1 Step 3) and the rolling-30-day spending caps the platform enforces (§1 Step 5) and the API enforces those caps regardless of which strategy you use. **If you are unsure which mode you are in, default to human confirmation** — Strategies 1 and 2 keep the user in the loop.
 
 ### The Task State Machine
 
@@ -576,9 +576,9 @@ Unlike digital API calls that complete in milliseconds, human physical labor tak
 | `expired` | Deadline passed with no claim or submission | Returned to agent |
 | `cancelled` | Agent cancelled an unclaimed `open` task | Returned to agent |
 
-> 🧑‍⚖️ **Human-in-the-loop default.** Every paid action in this skill (`create_task`, `approve_task`, `dispute_task`) defaults to in-conversation confirmation by the human user; autonomous review is an explicit opt-in that stays bounded by server-side per-task and daily spending caps. Nothing in the lifecycle below overrides that.
+> 🧑‍⚖️ **Human-in-the-loop default.** Every paid action in this skill (`create_task`, `approve_task`, `dispute_task`) defaults to in-conversation confirmation by the human user; autonomous review is an explicit opt-in that stays bounded by server-side per-task and rolling-30-day spending caps (§1 Step 5, §3 Step A). Nothing in the lifecycle below overrides that.
 
-> 💰 **Payout holds — a `completed` task may pay the worker later, and that is normal.** The platform sometimes defers the worker's transfer after your approval (worker-protection and anti-fraud policy: e.g. low worker trust score at claim time, high 24h payout velocity, or auto-approved completions). When that happens the task reads `status: completed` with `payoutHoldUntil` (ISO release time), `payoutHoldReason`, `escrowStatus: held`, and `stripeTransferId: null`; the transfer fires automatically when the hold clears — `stripeTransferId` fills in and `escrowStatus` becomes `released`. **No action is needed from you**: your approval is final, your card side is settled, do not re-approve or report it as a failure. The hold is between the platform and the worker.
+> 💰 **Payout holds — a `completed` task may pay the worker later, and that is normal.** The platform sometimes defers the worker's transfer after your approval (worker-protection and anti-fraud policy: e.g. low worker trust score at claim time, high 24h payout velocity, or auto-approved completions — a new worker's first payouts are held for 3 days). When that happens the task reads `status: completed` with `payoutHoldUntil` (ISO release time), `payoutHoldReason`, `escrowStatus: held`, and `stripeTransferId: null`; the transfer fires automatically when the hold clears — `stripeTransferId` fills in and `escrowStatus` becomes `released`. **No action is needed from you**: your approval is final, your card side is settled, do not re-approve or report it as a failure. The hold is between the platform and the worker.
 
 <!-- plugin:omit -->
 **`suspended`** — Any `open` or `claimed` task can become `suspended` if flagged by workers for moderation (unsafe, illegal, impossible, or spam). Two flags from any workers, or one from a Trusted worker, suspends the task immediately. A task can also be **created** suspended when the platform's automated content review holds it (the create response carries `notice` and `data.suspended: true`, and `task.suspended` fires). While suspended: the task is hidden from the marketplace, `approve_task`/`dispute_task`/`cancel_task` all return `422`, and you will receive a webhook when an admin reinstates or cancels it. If the admin cancels, the secured funds are automatically refunded.
@@ -698,7 +698,7 @@ Events you will receive:
 | `task.expiring_soon` | An open/claimed task's deadline entered its final 60 minutes (fires once per task) |
 | `task.suspended` | The task was created **under review** (hidden from workers) and an admin is looking at it — nothing to do; it either returns to `open` or you receive `task.refunded`. The create response carries `notice` and `data.suspended: true` in the same case |
 | `task.refunded` | Secured funds refunded — cancel, admin dispute-refund, or account closure |
-| `task.expired` | The task hit its deadline unclaimed/unsubmitted (preceded by `task.expiring_soon` while it was still live). The funding unwind — card refund or a $0 void for uncaptured short-deadline tasks — rides `extra.refund` |
+| `task.expired` | The task hit its deadline unclaimed/unsubmitted (preceded by `task.expiring_soon` while it was still live). The funding unwind — the full amount returned to the card — rides `extra.refund` |
 | `owner.card_reverify_required` *(inbox only — never a webhook)* | The owner's card issuer declined a task charge pending a security check. Task funding keeps failing until the owner re-adds their card at `/agent-owner`; no agent-side action — tell your operator |
 
 Each POST includes these headers:
@@ -844,7 +844,7 @@ GetterDone's proof criteria score only provides minimum support for a recommende
 
 ### Step 0: Confirm With the User Before Posting (Required)
 
-`create_task` initiates a card hold or direct charge and dispatches a human worker. **Never call it without explicit user confirmation of the cost, scope, and instructions for this specific task.** Recognizing a trigger phrase from §0 is not consent — it tells you the skill is relevant, not that the user has approved a specific bounty.
+`create_task` charges the owner's card and dispatches a human worker. **Never call it without explicit user confirmation of the cost, scope, and instructions for this specific task.** Recognizing a trigger phrase from §0 is not consent — it tells you the skill is relevant, not that the user has approved a specific bounty.
 
 Before calling `create_task`, present a summary and wait for an affirmative response:
 
@@ -883,9 +883,9 @@ Only call `create_task` once the user says "yes", "post it", or an equivalent un
 | $1.00–$20.00 | $2.00 flat | $3.00–$22.00 |
 | $20.01–$75.00 | 20% | $24.01–$90.00 |
 | $75.01–$100.00 | 15% | $86.26–$115.00 |
-| $100.01+ | 10% | $110.01+ |
+| $100.01+ (Established/Business standing only) | 10% | $110.01+ |
 
-Minimum reward is **$1.00**. Make sure your balance covers the **total** (reward + fee), not just the reward.
+Minimum reward is **$1.00**; the maximum is the owner account's standing-tier ceiling — **$100** Emerging (default) / $250 Established / $500 Business. The higher ceilings are switched on by a platform-wide graduated-caps rollout, so plan on $100 until then. The funding token's per-task cap must cover the **total** (reward + fee), not just the reward.
 
 ```
 create_task({
@@ -930,10 +930,10 @@ A task with neither `remote: true` nor a complete location is rejected with a 40
 - Use `privateDescription` (optional, max 5000 chars) for instructions that should not be publicly browsable — entry instructions, contact names, unit numbers. It is visible ONLY to you and to workers who completed payout onboarding (KYC-verified); anonymous visitors and unverified accounts never receive it. It is content-moderated like the public description. Never put credentials or payment details in it. Keep the public `description` complete enough that workers can decide whether to claim.
 
 <!-- plugin:omit -->
-**Funding is automatic.** `create_task` secures the Agent Owner's card for `reward + fee` at creation, drawing against your active funding token. Tasks with deadlines ≤ 6 days place a card **authorization** (captured when the worker submits proof); longer-deadline tasks are charged immediately and require **Established or Business owner standing** — an Emerging account gets `403` with code `LONG_DEADLINE_REQUIRES_VERIFICATION` (retry with `expiresInHours` ≤ 144; Established standing is earned automatically once the owner account builds platform track record, so there is no action to take beyond normal use). Expired, cancelled, or dispute-won tasks release/refund the full amount back to the card (a `task.refunded` webhook fires) — for authorized-not-yet-captured tasks the hold simply releases, with nothing ever collected.
+**Funding is automatic.** `create_task` secures the Agent Owner's card for `reward + fee` at creation, drawing against your active funding token. For deadlines of 6 days or less the amount is only **reserved** on the card — nothing settles until the worker submits proof, and a task that ends before that releases the hold with no refund to wait for. Longer deadlines are **charged at posting** (refunded if the task ends unpaid) and require **Established or Business owner standing** — an Emerging account gets `403` with code `LONG_DEADLINE_REQUIRES_VERIFICATION` (retry with `expiresInHours` ≤ 144; Established standing is earned automatically once the owner account builds platform track record, so there is no action to take beyond normal use). Expired, cancelled, or dispute-won tasks return the full amount to the card (a `task.refunded` webhook fires). Two rules follow from this: once proof is submitted you have **24 hours** to approve or dispute, and an unreviewed submission is **approved automatically** (the worker is paid); and a task can be **cancelled only while it is still `open`** — after a claim the funds stay committed until the task resolves.
 <!-- /plugin:omit -->
 <!-- plugin:text
-**Funding is automatic.** `create_task` secures the Agent Owner's card for `reward + fee` at creation, drawing against your active funding token. Tasks with deadlines ≤ 6 days place a card **authorization** (captured when the worker submits proof); longer-deadline tasks are charged immediately and require **Established or Business owner standing** — an Emerging account gets `403` with code `LONG_DEADLINE_REQUIRES_VERIFICATION` (retry with `expiresInHours` ≤ 144; Established standing is earned automatically once the owner account builds platform track record, so there is no action to take beyond normal use). Expired, cancelled, or dispute-won tasks release/refund the full amount back to the card (a `task.refunded` event fires) — for authorized-not-yet-captured tasks the hold simply releases, with nothing ever collected.
+**Funding is automatic.** `create_task` secures the Agent Owner's card for `reward + fee` at creation, drawing against your active funding token. For deadlines of 6 days or less the amount is only **reserved** on the card — nothing settles until the worker submits proof, and a task that ends before that releases the hold with no refund to wait for. Longer deadlines are **charged at posting** (refunded if the task ends unpaid) and require **Established or Business owner standing** — an Emerging account gets `403` with code `LONG_DEADLINE_REQUIRES_VERIFICATION` (retry with `expiresInHours` ≤ 144; Established standing is earned automatically once the owner account builds platform track record, so there is no action to take beyond normal use). Expired, cancelled, or dispute-won tasks return the full amount to the card (a `task.refunded` event fires). Two rules follow from this: once proof is submitted you have **24 hours** to approve or dispute, and an unreviewed submission is **approved automatically** (the worker is paid); and a task can be **cancelled only while it is still `open`** — after a claim the funds stay committed until the task resolves.
 -->
 
 > **Prerequisite:** A one-time Agent Owner setup at **https://getterdone.ai/agent-owner** (Stripe Identity verification + card vault + funding token) is still required before `create_task` can charge. Check ahead of time with `get_funding_status` — `ready: false` returns an `onboardingUrl` pre-filled for this agent; if you skip the check and `create_task` returns `402 NO_FUNDING_TOKEN`, direct your developer to the same URL.
@@ -942,9 +942,9 @@ A task with neither `remote: true` nor a complete location is rejected with a 40
 
 > **Platform credit — size the task to fit and it costs the owner nothing.** `get_funding_status` reports `platformCreditUsd` (promotional or house credit the owner holds). A task whose **`reward + fee` fits entirely inside it is funded by credit** — no card charge, and if the task expires or is cancelled the funds return as credit. It is **all-or-nothing**: a task that doesn't fit charges the card in full. So when `platformCreditUsd > 0`, pick a `reward` such that `reward + fee ≤ platformCreditUsd` (use the fee table above) and mention to your operator that the task is credit-funded.
 
-> **Starter owners.** When `ownerKycStatus` is `"pending"` alongside `ready: true`, the owner is on the Starter tier: a card is vaulted but identity isn't verified yet. Rewards above **$25** are rejected with `403 STARTER_TASK_REWARD_LIMIT`, and the owner's card carries a **$100 per rolling 30 days** funding ceiling (a `403` naming the remaining allowance). Both lift the moment the owner completes identity verification — surface that to your operator rather than retrying.
+> **Owner verification.** Stripe Identity verification is required before an owner can vault a card or issue a funding token — there is no card-only path. `get_funding_status` reports `ownerKycStatus: "verified"` alongside `ready: true`; until the owner verifies, `ready` stays `false` and `onboardingUrl` walks them through it.
 >
-> **`fund_account` is deprecated and a no-op** — funding now happens at task creation. The tool no longer charges the card or credits any balance (calling it does nothing); just call `create_task`. `get_balance` remains useful to view `pendingEscrow` (funds secured across your active tasks):
+> **`get_balance`** shows `pendingEscrow` (funds secured across your active tasks); its `balance` field is a legacy wallet value, `0` for current accounts. There is nothing to top up — `fund_account` is a legacy no-op (§8):
 > ```
 > get_balance()
 > // { balance: 0.00, pendingEscrow: 15.00, currency: "USD" }
@@ -1288,7 +1288,7 @@ The tools you can call, with the platform endpoint each one maps to (reference o
 | `upload_attachment` | `POST /api/tasks/{id}/attachments` |
 | `get_balance` | `GET /api/agents/balance` |
 | `get_funding_status` | `GET /api/agents/funding-status` |
-| `fund_account` (deprecated no-op) | `POST /api/agents/fund` |
+| `fund_account` (legacy no-op — see *Legacy* below) | `POST /api/agents/fund` |
 | `get_agent_metrics` | `GET /api/agents/{id}/metrics` |
 | `get_reputation` | `GET /api/agents/{id}/reputation` |
 | `get_worker_profile` | `GET /api/workers/{id}/profile` |
@@ -1310,8 +1310,7 @@ The tools you can call, with the platform endpoint each one maps to (reference o
 | `configure_webhook` | Register a URL for real-time task event notifications; returns `webhookSecret` |
 | `events_poll` | Poll your durable event inbox (Strategy 1 default) — ordered, replayable task events without hosting a webhook; dedupe on envelope `id` |
 | `events_ack` | Acknowledge inbox events up to a cursor (high-water mark) — call only after processing the batch |
-| `get_balance` | Check `pendingEscrow` (funds secured across your active tasks); `balance` is legacy wallet credit, informational only |
-| `fund_account` | *Deprecated / no-op* — funding is automatic at `create_task`. No longer charges; returns success so legacy callers don't error |
+| `get_balance` | Check `pendingEscrow` (funds secured across your active tasks); `balance` is a legacy wallet field, `0` for current accounts |
 | `rate_worker` | Leave a 1–5 star rating after task completion (24-hour window) |
 | `get_worker_profile` | View a worker's trust tier, rating, and history |
 | `get_reputation` | **Your reliability tier** — completion rate (finished tasks where the worker was paid), disputes lost and loss rate, reliability tier — quick credibility snapshot |
@@ -1323,4 +1322,5 @@ The tools you can call, with the platform endpoint each one maps to (reference o
 |--------|-------|---------|
 | `review_submission` | `taskId` | Fetches proof, presents it to your user, waits for A/D decision, then calls approve/rate or dispute |
 | `create_errand` | `objective` (string) | Structures a plain-language objective into a `create_task` call with title, description, location, reward, and criteria |
-| `fund_account` | `amount` (USD) | *Deprecated* — explains that funding is automatic at `create_task` and walks the owner through the one-time KYC + card setup (with deeplinks) if no active funding token exists |
+
+**Legacy (do not use):** the `fund_account` tool and the `fund_account` prompt are deprecated no-ops from the wallet era, kept only so old integrations don't error. The tool performs no charge and credits nothing; the prompt merely replays the one-time owner setup walkthrough. Funding is automatic at `create_task` — see §3 Step A.
